@@ -43,7 +43,9 @@ test('reads the real on-screen voucher from a video without external requests', 
     return route.abort('blockedbyclient');
   });
   const evidence = await importFixture(page, false, true);
-  expect(evidence.some(row => row.source === 'frame' && /SALE99/i.test(row.text) && row.start >= 4)).toBe(true);
+  const summary = await page.locator('.toast').innerText();
+  const detail = JSON.stringify({ summary, evidence, external }, null, 2);
+  expect(evidence.some(row => row.source === 'frame' && /SALE99/i.test(row.text) && row.start >= 4), detail).toBe(true);
   await expect(page.locator('.evidence-card .tag')).toHaveText('Cần xử lý');
   expect(external).toEqual([]);
 });
