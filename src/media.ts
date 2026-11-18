@@ -96,6 +96,62 @@ async function audioSamples(blob: Blob) {
   return samples;
 }
 
+function contrastCaptions(frame: HTMLCanvasElement) {
+  const band = Math.max(1, Math.round(frame.height * 0.28));
+  const side = Math.round(frame.width * 0.045);
+  const inset = Math.round(frame.height * 0.03);
+  const width = frame.width - side * 2;
+  const margin = 12;
+  const canvas = document.createElement('canvas');
+  canvas.width = width + margin * 2;
+  canvas.height = band * 2 + margin * 3;
+  const context = canvas.getContext('2d', { alpha: false, willReadFrequently: true })!;
+  context.fillStyle = '#fff';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  for (const [top, y] of [[inset, margin], [frame.height - band - inset, band + margin * 2]]) {
+    context.drawImage(frame, side, top, width, band, margin, y, width, band);
+    const image = context.getImageData(margin, y, width, band);
+    const pixels = image.data;
+    const luma = new Uint8ClampedArray(pixels.length / 4);
+    const histogram = new Uint32Array(256);
+    let sum = 0;
+    for (let i = 0; i < luma.length; i++) {
+      const j = 4 * i;
+      luma[i] = (pixels[j] * 3 + pixels[j + 1] * 6 + pixels[j + 2]) / 10;
+      histogram[luma[i]]++;
+      sum += luma[i];
+    }
+    let count = 0;
+    let cumulative = 0;
+    let max = 0;
+    let threshold = 128;
+    let darkPixels = 0;
+    for (let i = 0; i < histogram.length - 1; i++) {
+      count += histogram[i];
+      cumulative += histogram[i] * i;
+      if (count <= 0 || count >= luma.length) continue;
+      const meanDifference = cumulative / count - (sum - cumulative) / (luma.length - count);
+      const variance = count * (luma.length - count) * meanDifference ** 2;
+      if (variance > max) {
+        max = variance;
+        threshold = i;
+        darkPixels = count;
+      }
+    }
+    const invert = darkPixels > luma.length * 0.52;
+    for (let i = 0; i < luma.length; i++) {
+      const value = (luma[i] <= threshold) === invert ? 255 : 0;
+      pixels[4 * i] = pixels[4 * i + 1] = pixels[4 * i + 2] = value;
+    }
+    context.putImageData(image, margin, y);
+  }
+  return canvas;
+}
+
+function hasOfferText(value: string) {
+  return /\d{2,}\s*(?:k\b|[.,]\d{3}|đ|vnd)|(?<![\p{L}\d])(?:voucher|mã|tặng)(?![\p{L}\d])/iu.test(value);
+}
+
 async function readFrames(video: HTMLVideoElement, progress: (message: string) => void, signal: AbortSignal) {
   const [{ createWorker, PSM }, workerAsset, coreAsset] = await Promise.all([
     import('tesseract.js'),
@@ -146,8 +202,16 @@ async function readFrames(video: HTMLVideoElement, progress: (message: string) =
       progress(`Đọc chữ trên video · khung ${i + 1}/${frames}`);
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       const { data } = await worker.recognize(canvas);
-      const text = data.text.trim().replace(/\n\s*\n/g, '\n');
-      if (text) evidence.push({ start: Math.round(at * 10) / 10, end: null, text, source: 'frame' });
+      let text = data.text.trim();
+      if (!hasOfferText(text)) {
+        const { data: highContrast } = await worker.recognize(contrastCaptions(canvas));
+        const alternative = highContrast.text.trim();
+        if (alternative && (hasOfferText(alternative) || highContrast.confidence > data.confidence)) text = alternative;
+      }
+      if (text) evidence.push({
+        start: Math.round(at * 10) / 10, end: null,
+        text: text.replace(/\n\s*\n/g, '\n'), source: 'frame',
+      });
     }
     return evidence;
   };
