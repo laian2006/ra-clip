@@ -75,6 +75,13 @@ function checkClaim(clip: Clip, claim: Claim, options: Offer[], now: number): Fi
 
   const [offer] = candidates;
   const reference = referenceValue(offer, claim);
+  let mismatch = '';
+  if (claim.kind === 'price' && offer.price !== null && claim.value !== offer.price) {
+    mismatch = 'Giá được nhắc khác giá ghi trong bảng ưu đãi.';
+  }
+  if (claim.kind === 'gift' && giftKey(String(claim.value)) !== giftKey(offer.gift)) {
+    mismatch = 'Quà tặng được nhắc khác bảng ưu đãi.';
+  }
   const starts = offer.start ? parseVietnamTime(offer.start) : null;
   const ends = offer.end ? parseVietnamTime(offer.end, true) : null;
   const expired = ends !== null && now > ends;
@@ -93,6 +100,7 @@ function checkClaim(clip: Clip, claim: Claim, options: Offer[], now: number): Fi
     return finding(clip, claim, 'review', 'Ngày ghi trong clip chưa khớp lịch của ưu đãi. Kiểm tra trước khi dùng lại.', reference);
   }
   if (statedEnd !== null && now > statedEnd && (ends !== null && (starts === null || statedEnd >= starts))) {
+    if (mismatch) return finding(clip, claim, 'action', mismatch, reference);
     return finding(clip, claim, 'dated', `Clip có ghi ngày ${displayDate(disclosure)}. Kiểm tra trước khi tái sử dụng.`, reference);
   }
   if (expired) {
@@ -107,12 +115,7 @@ function checkClaim(clip: Clip, claim: Claim, options: Offer[], now: number): Fi
   if (claim.kind === 'price' && offer.price === null) {
     return finding(clip, claim, 'review', 'Bảng chưa có giá để so sánh.', reference);
   }
-  if (claim.kind === 'price' && claim.value !== offer.price) {
-    return finding(clip, claim, 'action', 'Giá được nhắc khác giá ghi trong bảng ưu đãi.', reference);
-  }
-  if (claim.kind === 'gift' && giftKey(String(claim.value)) !== giftKey(offer.gift)) {
-    return finding(clip, claim, 'action', 'Quà tặng được nhắc khác bảng ưu đãi.', reference);
-  }
+  if (mismatch) return finding(clip, claim, 'action', mismatch, reference);
   if (offer.condition && !fold(claim.evidence.text).includes(fold(offer.condition))) {
     return finding(clip, claim, 'review', `Xác nhận clip đã nêu điều kiện: ${offer.condition}.`, reference);
   }

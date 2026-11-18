@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { Workspace } from '../src/domain';
+import { extractClaims } from '../src/claims';
 
 async function mediaEvidence(page: Page) {
   return page.evaluate(async () => {
@@ -47,9 +48,13 @@ test('reads the real on-screen voucher from a video without external requests', 
   expect(external).toEqual([]);
 });
 
-test('transcribes speech in a browser using the real Whisper model', async ({ page }) => {
+test('finds the spoken price with Vietnamese PhoWhisper', async ({ page }) => {
   test.skip(process.env.RA_CLIP_TEST_MODELS !== '1', 'Opt in to the first-use model download.');
   test.setTimeout(150_000);
   const evidence = await importFixture(page, true, false);
-  expect(evidence.some(row => row.source === 'audio' && row.text.length > 10)).toBe(true);
+  const claims = extractClaims({
+    id: 'audio-test', title: 'Clip thử', sku: 'BINH-500', link: '', published: '',
+    localMedia: true, evidence: evidence.filter(row => row.source === 'audio'),
+  }, []);
+  expect(claims).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'price', value: 99000 })]));
 });

@@ -61,6 +61,12 @@ describe('Audit decisions and versions', () => {
     expect(first(clip('Mã SALE99 áp dụng đến ngày 14/11.'))[0].verdict).toBe('review');
   });
 
+  it('flags a wrong price even when the clip names the correct end date', () => {
+    const findings = first(clip('Còn 89k với mã SALE99, chỉ ngày 11/11.'));
+    expect(findings.find(row => row.kind === 'price')?.verdict).toBe('action');
+    expect(findings.find(row => row.kind === 'code')?.verdict).toBe('dated');
+  });
+
   it('uses the date-only expiry through the end of a Vietnam day', () => {
     expect(first(clip('Mã SALE99.'), [offer], '2026-11-11T23:59:59')[0].verdict).toBe('clear');
     expect(first(clip('Mã SALE99.'), [offer], '2026-11-12T00:00:00')[0].verdict).toBe('action');

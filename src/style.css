@@ -316,6 +316,11 @@
     .clip-row, .list-labels { padding-inline: 10px; grid-template-columns: minmax(0, 1fr) minmax(94px, 29%) 12px; gap: 6px; }
     .clip-glyph { width: 26px; height: 29px; }
   }
+  @media (max-width: 370px) {
+    .scan-controls { display: grid; }
+    .scan-controls label { justify-content: space-between; }
+    .sidebar nav button svg { display: none; }
+  }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
   }

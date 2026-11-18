@@ -10,6 +10,7 @@ if (env.backends.onnx.wasm) {
 interface ModelOptions {
   device: 'wasm';
   dtype: 'q8';
+  revision: string;
   progress_callback: (update: { status: string; progress: number }) => void;
 }
 
@@ -19,9 +20,10 @@ const createTranscriber = pipeline as unknown as
 let model: Promise<AutomaticSpeechRecognitionPipeline> | undefined;
 
 async function recognize(samples: Float32Array) {
-  model ??= createTranscriber('automatic-speech-recognition', 'onnx-community/whisper-tiny', {
+  model ??= createTranscriber('automatic-speech-recognition', 'huuquyet/PhoWhisper-base', {
     device: 'wasm',
     dtype: 'q8',
+    revision: '7623a803636be73f54c30dfa4ce1c42cdc9bbbcf',
     progress_callback: update => {
       if (update.status === 'progress') {
         self.postMessage({ kind: 'progress', message: `Tải mô hình giọng nói · ${Math.floor(update.progress)}%` });

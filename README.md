@@ -29,9 +29,9 @@ Mở địa chỉ Vite in ra, thường là `http://127.0.0.1:5173`. App mở v�
 
 ## Cách hoạt động
 
-`src/media.ts` đọc và lấy mẫu khung hình trong trình duyệt. `src/speech.worker.ts` chạy Whisper Tiny đa ngôn ngữ bằng WebAssembly trong Web Worker. OCR dùng Tesseract với tiếng Việt và tiếng Anh. `src/claims.ts` trích giá, voucher, quà tặng và mốc trong câu. `src/audit.ts` đối chiếu các đoạn đó với phiên bản ưu đãi và giữ dấu vết theo từng clip. IndexedDB lưu file video, đoạn nhận dạng, các phiên bản và phản hồi.
+`src/media.ts` đọc và lấy mẫu khung hình trong trình duyệt. `src/speech.worker.ts` chạy PhoWhisper Base tinh chỉnh cho tiếng Việt bằng WebAssembly trong Web Worker. OCR dùng Tesseract với tiếng Việt và tiếng Anh. `src/claims.ts` trích giá, voucher, quà tặng và mốc trong câu. `src/audit.ts` đối chiếu các đoạn đó với phiên bản ưu đãi và giữ dấu vết theo từng clip. IndexedDB lưu file video, đoạn nhận dạng, các phiên bản và phản hồi.
 
-Lần đầu dùng lời thoại, trình duyệt tải mô hình từ Hugging Face. OCR dùng tệp ngôn ngữ đi cùng app. File và nội dung video được xử lý tại chỗ. Dữ liệu demo tách khỏi dữ liệu shop và toàn bộ dữ liệu được lưu trong hồ sơ trình duyệt đang dùng.
+Lần đầu dùng lời thoại, trình duyệt tải mô hình khoảng 80 MB từ Hugging Face. OCR dùng tệp ngôn ngữ đi cùng app. File và nội dung video được xử lý tại chỗ. Dữ liệu demo tách khỏi dữ liệu shop và toàn bộ dữ liệu được lưu trong hồ sơ trình duyệt đang dùng.
 
 Kết quả phản ánh **bảng shop nhập tại thời điểm rà**. Giá theo từng tài khoản hoặc điều kiện thanh toán cần dữ liệu tương ứng. Nhận dạng có thể bỏ sót chữ xuất hiện ngắn, đọc nhầm tiếng Việt có nhạc nền, hoặc gặp câu mơ hồ khi một SKU có nhiều ưu đãi. Dùng trạng thái **Cần xác nhận** và đoạn video gốc để kiểm tra trước khi sửa nội dung. Xóa dữ liệu trang trong trình duyệt sẽ xóa kho cùng báo cáo đang lưu trên thiết bị đó.
 
@@ -44,6 +44,6 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-Bộ kiểm thử kiểm tra cách đọc tiếng Việt, ngày hết hạn UTC+7, nhập Excel, đối chiếu các phiên bản, phản hồi, phát đúng giây, OCR và xuất CSV. Bài kiểm thử Whisper dùng tải mô hình mạng ngoài và có thể bật bằng biến môi trường `RA_CLIP_TEST_MODELS=1`. Có thể chọn trình duyệt Microsoft Edge đã cài bằng `RA_CLIP_BROWSER=msedge`.
+Bộ kiểm thử kiểm tra cách đọc tiếng Việt, ngày hết hạn UTC+7, nhập Excel, đối chiếu các phiên bản, phản hồi, phát đúng giây, OCR và xuất CSV. Bài kiểm thử PhoWhisper dùng tải mô hình mạng ngoài và có thể bật bằng biến môi trường `RA_CLIP_TEST_MODELS=1`. Có thể chọn trình duyệt Microsoft Edge đã cài bằng `RA_CLIP_BROWSER=msedge`.
 
 Mã nguồn theo [MIT](LICENSE). Ảnh sản phẩm, nội dung clip và dữ liệu mẫu được tạo riêng cho demo. Giọng demo dùng Piper VAIS1000 với lời thoại tổng hợp. [Ghi chú về mô hình và dữ liệu](THIRD_PARTY.md)

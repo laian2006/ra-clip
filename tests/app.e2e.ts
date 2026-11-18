@@ -55,10 +55,14 @@ test('real workspace imports Excel, takes notes, rechecks on offer change and pe
 });
 
 test('mobile layout keeps controls visible without horizontal overflow', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Rà soát video sau sale' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Rà soát ngay' })).toBeVisible();
-  const dimensions = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
-  expect(dimensions[0]).toBeLessThanOrEqual(dimensions[1]);
+  for (const width of [320, 360, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expect(page.getByRole('heading', { name: 'Rà soát video sau sale' })).toBeVisible();
+    const button = page.getByRole('button', { name: 'Rà soát ngay' });
+    await expect(button).toBeVisible();
+    const bounds = (await button.boundingBox())!;
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  }
 });
