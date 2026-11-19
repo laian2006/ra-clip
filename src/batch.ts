@@ -41,7 +41,7 @@ export function failScan(clip: Clip, options: ScanOptions, detail: string): Clip
   return { ...clip, lastScan: { ...options, at: localTime(), state: 'failed', detail: detail.slice(0, 1600) } };
 }
 
-export async function analyzeStoredClip(clip: Clip, options: ScanOptions, signal: AbortSignal, progress: (text: string) => void) {
+export async function loadClipVideo(clip: Clip, signal: AbortSignal) {
   const fixture = demoAsset(clip);
   const file = clip.localMedia ? await loadMedia(clip.id)
     : fixture ? await fetch(`${fixture}.webm`, { signal }).then(response => {
@@ -50,6 +50,11 @@ export async function analyzeStoredClip(clip: Clip, options: ScanOptions, signal
     }) : undefined;
   signal.throwIfAborted();
   if (!file) throw Error('File video không còn trong bộ nhớ trình duyệt.');
+  return file;
+}
+
+export async function analyzeStoredClip(clip: Clip, options: ScanOptions, signal: AbortSignal, progress: (text: string) => void) {
+  const file = await loadClipVideo(clip, signal);
   const analysis = await analyzeVideo(file, options, progress, signal);
   signal.throwIfAborted();
   return completeScan(clip, options, analysis);

@@ -58,6 +58,28 @@ export async function videoMetadata(blob: Blob, signal = new AbortController().s
   }
 }
 
+export async function captureFrame(blob: Blob, seconds: number, signal: AbortSignal) {
+  const { video, release } = await videoMetadata(blob, signal);
+  try {
+    if (seconds > video.duration + 0.05) throw Error('Mốc này nằm ngoài thời lượng video.');
+    const target = Math.min(seconds, Math.max(0, video.duration - 0.02));
+    if (Math.abs(video.currentTime - target) > 0.001) {
+      const seeked = waitForMedia(video, 'seeked', signal);
+      video.currentTime = target;
+      await seeked;
+    }
+    signal.throwIfAborted();
+    const canvas = document.createElement('canvas');
+    const scale = Math.min(1, 640 / Math.max(video.videoWidth, video.videoHeight));
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+    const context = canvas.getContext('2d');
+    if (!context) throw Error('Trình duyệt không tạo được ảnh khung hình.');
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.86);
+  } finally { release(); }
+}
+
 let speechWorker: Worker | undefined;
 let speechReady = false;
 export const speechIsReady = () => speechReady;

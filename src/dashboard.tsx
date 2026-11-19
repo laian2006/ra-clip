@@ -8,7 +8,7 @@ import { clipFormats, kindLabels, reviewLabels, sourceLabels, timestamp, verdict
 import type { Clip, ClipFormat, ClipResult, Evidence, Finding, Review, Verdict } from './domain';
 import { loadMedia } from './storage';
 import { demoAsset } from './demo';
-import { EvidenceTimeline } from './evidence';
+import { EvidenceFrame, EvidenceTimeline } from './evidence';
 import { captionsFor } from './captions';
 import { lastScanDetail, lastScanLabel } from './batch';
 import { coverageHelp } from './audit';
@@ -270,6 +270,8 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
           <p>{coverage?.reason ?? active.reason}</p>
           {active.reference && <div className="evidence-reference"><span>Bảng ưu đãi</span><strong>{active.reference}</strong></div>}
           {active.evidence && <p className="evidence-source">Nguồn · {sourceLabels[active.evidence.source]}</p>}
+          {playable && active.evidence?.source === 'frame' && <EvidenceFrame key={`${clip.mediaRevision ?? ''}:${active.evidence.start}`}
+            clip={clip} seconds={active.evidence.start} onJump={() => select(active)} />}
           {active.verdict === 'review' && <button className="button secondary evidence-next" type="button" onClick={nextAction.run} disabled={busy}>
             {nextAction.label}</button>}
         </div>

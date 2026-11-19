@@ -54,6 +54,7 @@ test('real workspace imports Excel, takes notes, rechecks on offer change and pe
   await page.getByRole('textbox', { name: 'Giá (đ)' }).fill('149000');
   await page.getByRole('button', { name: 'Lưu phiên bản' }).click();
   await expect(page.getByText('Đã lưu bảng v2. Đã rà lại 1 video.')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Tác động của bảng v2' })).toContainText('1 có cảnh báo mới hoặc đổi');
   await page.getByRole('button', { name: /Phiên bản 1/ }).click();
   await expect(page.getByText('129.000 đ', { exact: true })).toBeVisible();
   await page.getByRole('navigation').getByRole('button', { name: 'Rà soát', exact: true }).click();

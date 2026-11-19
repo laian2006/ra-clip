@@ -1,4 +1,4 @@
-import { ArrowDownToLine, ArrowUpRight, Check, ClipboardList, Search, StickyNote } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpRight, Check, ClipboardList, MessageSquare, Search, StickyNote } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { fold } from './claims';
 import { kindLabels, reviewLabels, timestamp } from './domain';
@@ -8,6 +8,8 @@ import { Modal, TableRegion, Tag } from './ui';
 import { numberLabel } from './catalog';
 import { queueEntries, reviewOpen } from './workflow';
 import { coverageHelp } from './audit';
+import { HandoffDialog } from './handoff';
+import { groupHandoff } from './impact';
 
 type QueueFilter = 'open' | 'done' | 'wrong' | 'all';
 type QueueSort = 'severity' | 'orders' | 'views';
@@ -27,6 +29,8 @@ export function QueueView({ workspace, busy, exportBlocked, onReview, onNote, on
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<QueueFilter>('open');
   const [sort, setSort] = useState<QueueSort>('severity');
+  const [creator, setCreator] = useState('');
+  const [share, setShare] = useState(false);
   const [selection, setSelection] = useState<Set<string>>(() => new Set());
   const [noteFor, setNoteFor] = useState<string>();
   const [draft, setDraft] = useState('');
@@ -38,6 +42,7 @@ export function QueueView({ workspace, busy, exportBlocked, onReview, onNote, on
   const state = (review: Review | undefined): QueueFilter => reviewOpen(review) ? 'open' : review === 'done' ? 'done' : 'wrong';
   const rows = entries.filter(({ clip, finding, note, review }) =>
     (filter === 'all' || state(review) === filter) &&
+    (!creator || `creator:${clip.creator?.trim() ?? ''}` === creator) &&
     fold(`${clip.title} ${clip.sku} ${clip.creator ?? ''} ${finding.claim} ${finding.reason} ${note}`).includes(q))
     .sort((a, b) => {
       if (sort !== 'severity') {
@@ -47,10 +52,12 @@ export function QueueView({ workspace, busy, exportBlocked, onReview, onNote, on
       return Number(b.finding.verdict === 'action') - Number(a.finding.verdict === 'action');
     });
   const selected = rows.filter(row => selection.has(row.finding.id));
+  const creators = useMemo(() => groupHandoff(entries), [entries]);
+  const handoffRows = (selected.length ? selected : rows).filter(row => reviewOpen(row.review));
   const selectedIds = selected.map(row => row.finding.id);
   const noteRow = entries.find(item => item.finding.id === noteFor);
 
-  useEffect(() => { setSelection(new Set()); }, [filter, query]);
+  useEffect(() => { setSelection(new Set()); }, [filter, query, creator]);
 
   function setChecked(id: string, checked: boolean) {
     setSelection(values => {
@@ -97,8 +104,12 @@ export function QueueView({ workspace, busy, exportBlocked, onReview, onNote, on
 
   return <section className="panel queue-panel">
     <div className="panel-heading ops-heading"><div><h2>Danh sách việc</h2><p>{entries.filter(row => reviewOpen(row.review)).length} việc đang mở</p></div>
-      <button className="button secondary" type="button" disabled={!rows.length || exportBlocked} onClick={exportRows}
-        aria-describedby={exportBlocked ? 'pending-audit' : undefined}><ArrowDownToLine size={16} /> Xuất danh sách</button>
+      <div className="queue-actions">
+        <button className="button secondary" type="button" disabled={!rows.length || exportBlocked} onClick={exportRows}
+          aria-describedby={exportBlocked ? 'pending-audit' : undefined}><ArrowDownToLine size={16} /> Xuất danh sách</button>
+        <button className="button primary" type="button" disabled={!handoffRows.length || exportBlocked} onClick={() => setShare(true)}
+          aria-describedby={exportBlocked ? 'pending-audit' : undefined}><MessageSquare size={16} /> Soạn bản nhắc</button>
+      </div>
     </div>
     <div className="ops-toolbar">
       <div className="segmented" ref={filtersRef} role="group" aria-label="Lọc theo tiến độ">
@@ -110,6 +121,10 @@ export function QueueView({ workspace, busy, exportBlocked, onReview, onNote, on
       <div className="queue-controls">
         <label className="search-box"><Search size={16} /><input aria-label="Tìm việc" placeholder="Video, SKU, nhà sáng tạo…"
           value={query} onChange={event => setQuery(event.target.value)} /></label>
+        {creators.length > 0 && <label className="sort-control"><span>Người đăng</span><select aria-label="Người đăng" value={creator} onChange={event => setCreator(event.target.value)}>
+          <option value="">Tất cả</option>
+          {creators.map(([name]) => <option value={`creator:${name}`} key={name}>{name || 'Chưa gán người đăng'}</option>)}
+        </select></label>}
         <label className="sort-control"><span>Sắp xếp</span><select value={sort} onChange={event => setSort(event.target.value as QueueSort)}>
           <option value="severity">Mức cần xử lý</option><option value="orders">Nhiều đơn đã nhập</option><option value="views">Nhiều lượt xem đã nhập</option>
         </select></label>
@@ -158,5 +173,7 @@ export function QueueView({ workspace, busy, exportBlocked, onReview, onNote, on
           <button className="button primary" type="submit" disabled={savingNote}>Lưu ghi chú</button></div>
       </form>
     </Modal>}
+    {share && workspace.audit && <HandoffDialog rows={handoffRows} version={workspace.versions.length} checkedAt={workspace.audit.checkedAt}
+      onClose={() => setShare(false)} />}
   </section>;
 }

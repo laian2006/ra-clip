@@ -25,6 +25,9 @@ import { auditCsv, download, downloadBlob, importOffers } from './files';
 import { analyzeVideo, videoMetadata, type ScanOptions } from './media';
 import { emptyWorkspace, refreshDemo, sampleWorkspace } from './demo';
 import { OffersView } from './offers';
+import { latestOfferImpact } from './impact';
+import { OfferImpactDialog, OfferImpactSummary } from './impact-view';
+import { HandoffDialog } from './handoff';
 import { DemoStart, ShopStart } from './start';
 import { createCampaign, listCampaigns, loadMedia, loadWorkspace, renameCampaign, saveWorkspace, type MediaChange } from './storage';
 import { Brand, Modal } from './ui';
@@ -92,12 +95,14 @@ export function App() {
   const [duplicateIds, setDuplicateIds] = useState<Set<string>>();
   const [selected, setSelected] = useState('');
   const [date, setDate] = useState('');
-  const [dialog, setDialog] = useState<'clip' | 'offers' | 'delete' | 'campaigns' | 'evidence' | 'catalog' | 'batch' | null>(null);
+  const [dialog, setDialog] = useState<'clip' | 'offers' | 'delete' | 'campaigns' | 'evidence' | 'catalog' | 'batch' | 'impact' | 'impact-handoff' | null>(null);
   const [editing, setEditing] = useState<Clip>();
   const [evidenceIndex, setEvidenceIndex] = useState<number | null>(null);
   const [findingFocus, setFindingFocus] = useState('');
   const [showDetail, setShowDetail] = useState(false);
+  const [boardFocus, setBoardFocus] = useState<{ id: 'clip-evidence' | 'clip-list-heading' }>();
   const todo = useMemo(() => workspace ? queueEntries(workspace).filter(row => reviewOpen(row.review)).length : 0, [workspace]);
+  const impact = useMemo(() => workspace && page === 'offers' ? latestOfferImpact(workspace) : undefined, [workspace, page]);
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState<Notice | null>(null);
   const [deleted, setDeleted] = useState<DeletedVideo>();
@@ -190,12 +195,17 @@ export function App() {
     });
   }
   function focusBoard(id: 'clip-evidence' | 'clip-list-heading') {
-    requestAnimationFrame(() => {
-      const target = document.getElementById(id);
+    setBoardFocus({ id });
+  }
+  useEffect(() => {
+    if (!boardFocus) return;
+    const frame = requestAnimationFrame(() => {
+      const target = document.getElementById(boardFocus.id);
       target?.focus({ preventScroll: true });
       target?.scrollIntoView({ block: 'start' });
     });
-  }
+    return () => cancelAnimationFrame(frame);
+  }, [boardFocus]);
   function selectClip(id: string) {
     setSelected(id); setFindingFocus('');
     if (window.matchMedia('(max-width: 900px)').matches) {
@@ -613,7 +623,8 @@ export function App() {
         {page === 'queue' && <QueueView workspace={data} onOpen={openFinding} onReview={review} onNote={note} busy={!!busy} exportBlocked={dateChanged} />}
         {page === 'history' && <HistoryView snapshots={data.snapshots ?? []} onReport={() => go('report')} />}
         {page === 'offers' && <OffersView versions={data.versions} clips={data.clips} onImport={() => importInput.current?.click()}
-          onEdit={() => setDialog('offers')} onNext={!data.demo && !data.clips.length ? () => { go('report'); startAdd(); } : undefined} busy={!!busy} />}
+          onEdit={() => setDialog('offers')} onNext={!data.demo && !data.clips.length ? () => { go('report'); startAdd(); } : undefined} busy={!!busy}
+          impactSummary={impact && impact.clipCount > 0 ? <OfferImpactSummary impact={impact} onOpen={() => setDialog('impact')} /> : undefined} />}
         {page === 'guide' && <Guide onOffers={() => go('offers')} onAdd={startAdd} onReport={() => go('report')} />}
       </div>
     </main>
@@ -633,6 +644,11 @@ export function App() {
     {dialog === 'evidence' && <EvidenceDialog row={evidenceIndex === null ? undefined : editing?.evidence[evidenceIndex]}
       onSave={saveEvidence} onClose={clearDialog} />}
     {dialog === 'offers' && <OfferDialog offers={version?.offers ?? []} onClose={clearDialog} onSave={newOffers} />}
+    {dialog === 'impact' && impact && <OfferImpactDialog impact={impact} onClose={clearDialog}
+      onOpen={(clip, finding) => { clearDialog(); openFinding(clip, finding); }}
+      onHandoff={() => setDialog('impact-handoff')} blockHandoff={dateChanged} />}
+    {dialog === 'impact-handoff' && impact && <HandoffDialog rows={impact.pending} version={impact.version} checkedAt={impact.checkedAt}
+      onClose={() => setDialog('impact')} />}
     {dialog === 'delete' && <Modal title="Xóa video?" detail={editing?.title} busy={!!busy} onClose={clearDialog}>
       <p className="delete-description">File video, phụ đề và phản hồi của clip này sẽ bị xóa khỏi trình duyệt.</p>
       <div className="dialog-actions"><button className="button secondary" onClick={clearDialog} disabled={!!busy}>Giữ lại</button>

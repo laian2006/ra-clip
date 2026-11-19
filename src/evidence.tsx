@@ -1,9 +1,50 @@
-import { useState, type FormEvent } from 'react';
-import { CircleAlert, CirclePlay, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { CircleAlert, CirclePlay, Image, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { fold } from './claims';
 import { sourceLabels, timestamp } from './domain';
 import type { Clip, Evidence } from './domain';
 import { Modal } from './ui';
+import { loadClipVideo } from './batch';
+import { captureFrame } from './media';
+
+export function EvidenceFrame({ clip, seconds, onJump }: { clip: Clip; seconds: number; onJump: () => void }) {
+  const [src, setSrc] = useState('');
+  const [visible, setVisible] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const task = useRef<AbortController | null>(null);
+  useEffect(() => () => task.current?.abort(), []);
+
+  async function open() {
+    if (loading || task.current) return;
+    if (src) { setVisible(!visible); return; }
+    const controller = new AbortController();
+    task.current = controller;
+    setLoading(true);
+    setError('');
+    try {
+      const blob = await loadClipVideo(clip, controller.signal);
+      setSrc(await captureFrame(blob, seconds, controller.signal));
+      setVisible(true);
+    } catch (failure) {
+      if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : 'Chưa mở được khung hình.');
+    } finally {
+      task.current = null;
+      if (!controller.signal.aborted) setLoading(false);
+    }
+  }
+
+  return <div className="evidence-frame">
+    <button className="text-button" type="button" onClick={() => void open()} disabled={loading} aria-expanded={visible}>
+      <Image size={16} /> {visible ? 'Ẩn khung hình' : 'Xem khung hình gốc'}
+    </button>
+    {loading && <p role="status">Đang lấy ảnh tại {timestamp(seconds)}…</p>}
+    {error && <p role="alert">{error}</p>}
+    {visible && <button className="frame-preview" type="button" onClick={onJump} aria-label={`Tua video đến ${timestamp(seconds)}`}>
+      <img src={src} alt={`Khung hình video tại ${timestamp(seconds)}`} />
+    </button>}
+  </div>;
+}
 
 export function EvidenceTimeline({ clip, playable, busy, initialSource, onJump, onEdit }: {
   clip: Clip; playable: boolean; busy: boolean; initialSource: Evidence['source'] | 'all';

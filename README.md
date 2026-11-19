@@ -36,6 +36,8 @@ Danh sách 9 tình huống và mốc kiểm tra có trong [kho video mẫu](docs
 
 Chọn **Dùng dữ liệu của bạn** và làm theo bước hiện trên màn hình **Rà soát**. App đề xuất nhập bảng, thêm video, gán mã sản phẩm hoặc phân tích clip theo dữ liệu đã có. Khi lưu bảng và video, kết quả đối chiếu tự cập nhật.
 
+Sau khi cập nhật bảng, mục **Tác động của bảng** so sánh hai phiên bản ở cùng thời điểm rà. Mở từng cảnh báo để đến đúng đoạn trong video. Trong mục này hoặc **Việc cần làm**, chọn **Soạn bản nhắc** để sao chép danh sách việc còn mở của từng người đăng.
+
 - **Chiến dịch:** mở **Quản lý chiến dịch** để tạo hoặc đổi tên từng đợt sale. Mỗi chiến dịch có kho video, bảng ưu đãi, phản hồi và nhật ký riêng. Chọn **Dùng dữ liệu của bạn** để vào không gian mặc định. Dữ liệu đã lưu bằng phiên bản 1.0 vẫn mở trong không gian này.
 - **Bảng ưu đãi:** nhập trang đầu của XLSX hoặc file CSV/TSV có các cột `sku, name, voucher, price, gift, start, end, condition`. Dùng mẫu CSV trong app. Mỗi cặp SKU và voucher là một dòng. Dòng không có mã đại diện cho giá hoặc ưu đãi thông thường. Giá tính bằng VNĐ, thời hạn dùng giờ Việt Nam (UTC+7).
 - **Kho video:** thêm MP4, WebM, M4V hoặc MOV mà trình duyệt đọc được, tối đa 150 MB và 2 phút mỗi file, tối đa 20 file mỗi lượt. Gán SKU, ngày đăng và kiểu video. Có thể dùng phụ đề SRT/VTT hoặc ghi chú như `00:05 Còn 99k khi áp mã SALE99.`

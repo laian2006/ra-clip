@@ -1,5 +1,5 @@
 import { ArrowRight, Clock3, Download, FileSpreadsheet, History, Pencil, Upload } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { displayDate, money, offerKey } from './domain';
 import type { Clip, Offer, OfferVersion } from './domain';
 import { csv, download, offersCsv, templateRows } from './files';
@@ -21,8 +21,9 @@ function fieldValue(field: OfferField, offer?: Offer) {
   return value;
 }
 
-export function OffersView({ versions, clips, onImport, onEdit, onNext, busy }: {
+export function OffersView({ versions, clips, onImport, onEdit, onNext, busy, impactSummary }: {
   versions: OfferVersion[]; clips: Clip[]; onImport: () => void; onEdit: () => void; onNext?: () => void; busy: boolean;
+  impactSummary?: ReactNode;
 }) {
   const [viewId, setView] = useState('');
   const [tab, setTab] = useState<'table' | 'diff'>('table');
@@ -50,6 +51,7 @@ export function OffersView({ versions, clips, onImport, onEdit, onNext, busy }: 
           <button className="button primary" disabled={busy} onClick={onEdit}><Pencil size={16} /> {current ? 'Sửa bảng' : 'Tạo bảng'}</button>
         </div>
       </div>
+      {viewing?.id === current?.id && impactSummary}
       {current && onNext && <div className="offer-next">
         <p>Bảng đã sẵn sàng. Thêm video có cùng mã sản phẩm (SKU) để app đối chiếu.</p>
         <button className="button primary" type="button" disabled={busy} onClick={onNext}>Thêm video để rà <ArrowRight size={16} aria-hidden="true" /></button>
