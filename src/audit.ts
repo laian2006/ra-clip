@@ -28,14 +28,32 @@ export function validateOffers(input: Offer[]): Offer[] {
   });
 }
 
-export function changedSkus(before: Offer[], after: Offer[]) {
+export const offerFields = ['name', 'price', 'gift', 'start', 'end', 'condition'] as const;
+export type OfferField = typeof offerFields[number];
+export interface OfferChange {
+  key: string;
+  sku: string;
+  code: string;
+  before?: Offer;
+  after?: Offer;
+  fields: OfferField[];
+}
+
+export function compareOffers(before: Offer[], after: Offer[]): OfferChange[] {
   const old = new Map(before.map(row => [offerKey(row), row]));
   const next = new Map(after.map(row => [offerKey(row), row]));
-  const skus = new Set<string>();
-  for (const [key, row] of [...old, ...next]) {
-    if (JSON.stringify(old.get(key)) !== JSON.stringify(next.get(key))) skus.add(row.sku);
-  }
-  return skus;
+  return [...new Set([...old.keys(), ...next.keys()])].flatMap(key => {
+    const previous = old.get(key);
+    const current = next.get(key);
+    const fields = offerFields.filter(field => previous?.[field] !== current?.[field]);
+    if (previous && current && !fields.length) return [];
+    const row = (current ?? previous)!;
+    return [{ key, sku: row.sku, code: row.code, before: previous, after: current, fields }];
+  });
+}
+
+export function changedSkus(before: Offer[], after: Offer[]) {
+  return new Set(compareOffers(before, after).map(row => row.sku));
 }
 
 function finding(clip: Clip, claim: Claim | null, verdict: Verdict, reason: string, reference = ''): Finding {

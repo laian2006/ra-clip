@@ -30,14 +30,14 @@ function spokenNumber(text: string): number | null {
 }
 
 function isComparisonPrice(prefix: string) {
-  return /\b(?:giam|tiet\s+kiem|voucher(?:\s+giam)?|giam\s+them|chiet\s+khau|gia\s+goc|gia\s+niem\s+yet)\s*[:=]?\s*$/.test(prefix);
+  return /\b(?:giam|tiet\s+kiem|voucher(?:\s+giam)?|giam\s+them|chiet\s+khau|gia\s+goc|gia\s+niem\s+yet|(?:hoa\s+)?don(?:\s+hang)?\s+(?:tu|tren|toi\s+thieu)|chi\s+tieu\s+(?:tu|toi\s+thieu))\s*[:=]?\s*$/.test(prefix);
 }
 
 function prices(text: string): number[] {
   const result = new Set<number>();
   for (const match of text.matchAll(pricePattern)) {
     const [, digits, unit, bare] = match;
-    const prefix = text.slice(Math.max(0, match.index! - 25), match.index);
+    const prefix = text.slice(Math.max(0, match.index! - 42), match.index);
     const suffix = text.slice(match.index! + match[0].length);
     if (isComparisonPrice(prefix)) continue;
     if (/^\s*(?:%|\/|ml\b|cm\b|mm\b|kg\b|g\b|w\b|mah\b|sp\b)/.test(suffix)) continue;
@@ -51,7 +51,7 @@ function prices(text: string): number[] {
     if (Number.isSafeInteger(value) && value > 0) result.add(value);
   }
   for (const match of text.matchAll(spoken)) {
-    const prefix = text.slice(Math.max(0, match.index! - 25), match.index);
+    const prefix = text.slice(Math.max(0, match.index! - 42), match.index);
     const amount = spokenNumber(match[1]);
     if (!isComparisonPrice(prefix) && amount && amount > 0) {
       result.add(amount * (match[2] === 'trieu' ? 1_000_000 : 1000));
@@ -85,7 +85,7 @@ function readDisclosure(text: string, published: string) {
     const [, day, month, year] = last;
     return `${year || published.slice(0, 4) || '????'}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
   }
-  if (/\b(?:chi\s+(?:co\s+)?hom\s+nay|het\s+hom\s+nay|den\s+het\s+hom\s+nay)\b/.test(text)) {
+  if (/\b(?:chi\s+(?:(?:co|ap\s+dung)\s+)?hom\s+nay|het\s+hom\s+nay|den\s+het\s+hom\s+nay)\b/.test(text)) {
     return published.slice(0, 10) || 'relative';
   }
   return '';
@@ -96,7 +96,9 @@ function readCodes(text: string, offers: Offer[]) {
   const explicit = Array.from(upper.matchAll(/(?:^|[^\p{L}\d])(?:MÃ|VOUCHER|CODE)\s*[:=]?\s*([A-Z\d][A-Z\d_-]{2,39})(?![\p{L}\d_-])/gu))
     .map(match => match[1]).filter(code => /\d/.test(code) || !['GIAM', 'SALE', 'CHO', 'FREESHIP', 'NAY'].includes(code));
   const tokens = new Set(upper.match(/[A-Z\d][A-Z\d_-]+/g));
-  const known = offers.map(offer => offer.code).filter(code => code && tokens.has(code));
+  const spaced = new Set(Array.from(upper.matchAll(/(?:^|[^\p{L}\d])(?:MÃ|VOUCHER|CODE)\s*[:=]?\s*([A-Z]{2,})[ \t]+(\d{2,})(?![\p{L}\d_-])/gu))
+    .map(match => match[1] + match[2]));
+  const known = offers.map(offer => offer.code).filter(code => code && (tokens.has(code) || spaced.has(code)));
   return [...new Set([...explicit, ...known].filter(code => /[A-Z]/.test(code)))];
 }
 
@@ -115,7 +117,7 @@ export function extractClaims(clip: Clip, offers: Offer[]) {
     const conditional = conditionPattern.test(text);
     const candidates: Array<Pick<Claim, 'kind' | 'value' | 'code'>> = [
       ...codes.map(value => ({ kind: 'code' as const, value, code: value })),
-      ...prices(text).map(value => ({ kind: 'price' as const, value, code })),
+      ...prices(fold(segment.text.normalize('NFC').replace(/\bngăn\b/gi, 'khoang'))).map(value => ({ kind: 'price' as const, value, code })),
       ...giftClaims(segment.text).map(value => ({ kind: 'gift' as const, value, code })),
     ];
     for (const candidate of candidates) {

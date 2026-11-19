@@ -1,49 +1,55 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDownToLine, ArrowRight, ArrowUpRight, BookOpen, CheckCircle2, ChevronDown, CircleAlert,
-  CircleHelp, Clapperboard, FileSpreadsheet, Film, Github, LayoutDashboard, LoaderCircle,
+  CircleHelp, Clapperboard, ClipboardList, FileSpreadsheet, Film, FolderOpen, Github, History, LayoutDashboard, LoaderCircle,
   Plus, ScanLine, ShieldCheck, SwitchCamera, X,
 } from 'lucide-react';
-import { runAudit } from './audit';
-import { ClipDetail, ClipList, leadVerdict, Metrics } from './dashboard';
+import { ClipDetail, ClipList, Metrics } from './dashboard';
+import { CampaignManager } from './campaigns';
+import { EvidenceDialog } from './evidence';
+import { HistoryView } from './history';
+import { QueueView } from './queue';
+import { makeBackup, readBackup } from './backup';
+import {
+  changeEvidence, leadVerdict, mergeScan, prepareWorkspace, queueEntries, reviewOpen, setFindingNote, setReviews, updatedReport,
+} from './workflow';
 import { ClipDialog, OfferDialog, type DraftClip } from './dialogs';
 import { displayDate, localTime, verdictLabels } from './domain';
-import type { Clip, Offer, Review, Verdict, Workspace } from './domain';
-import { auditCsv, download, importOffers } from './files';
+import type { Campaign, CampaignDraft, Clip, Evidence, Finding, Offer, Review, Verdict, Workspace } from './domain';
+import { auditCsv, download, downloadBlob, importOffers } from './files';
 import { analyzeVideo, videoMetadata, type ScanOptions } from './media';
-import { emptyWorkspace, sampleWorkspace } from './demo';
+import { demoAsset, emptyWorkspace, refreshDemo, sampleWorkspace } from './demo';
 import { OffersView } from './offers';
-import { loadMedia, loadWorkspace, saveWorkspace, type MediaChange } from './storage';
+import { createCampaign, listCampaigns, loadMedia, loadWorkspace, renameCampaign, saveWorkspace, type MediaChange } from './storage';
 import { Brand, Modal } from './ui';
 
-type Page = 'report' | 'clips' | 'offers' | 'guide';
+type Page = 'report' | 'queue' | 'clips' | 'offers' | 'history' | 'guide';
 type Notice = { text: string; error?: boolean };
 const pages = [
   { id: 'report', label: 'Rà soát', icon: LayoutDashboard },
+  { id: 'queue', label: 'Việc cần làm', icon: ClipboardList },
   { id: 'clips', label: 'Kho video', icon: Film },
   { id: 'offers', label: 'Bảng ưu đãi', icon: FileSpreadsheet },
+  { id: 'history', label: 'Nhật ký rà', icon: History },
   { id: 'guide', label: 'Hướng dẫn', icon: CircleHelp },
 ] as const;
 
 const title: Record<Page, string> = {
-  report: 'Rà soát video sau sale', clips: 'Kho video', offers: 'Bảng ưu đãi', guide: 'Hướng dẫn sử dụng',
+  report: 'Rà soát video sau sale', queue: 'Việc cần làm', clips: 'Kho video',
+  offers: 'Bảng ưu đãi', history: 'Nhật ký rà soát', guide: 'Hướng dẫn sử dụng',
 };
 
 const descriptions: Record<Page, string> = {
   report: 'Tìm lại những clip còn nhắc giá, voucher hoặc quà tặng cũ.',
+  queue: 'Xác nhận kết quả, ghi chú và theo dõi các việc sau sale.',
   clips: 'Quản lý video, phụ đề và mã sản phẩm cần đối chiếu.',
-  offers: 'Lưu từng phiên bản giá, voucher và quà tặng theo SKU.',
+  offers: 'So sánh giá, voucher, quà tặng và các SKU chịu ảnh hưởng.',
+  history: 'Xem lại báo cáo từng lần rà và các clip đổi trạng thái.',
   guide: 'Từ bảng ưu đãi và clip gốc đến báo cáo có bằng chứng.',
 };
 
 function errorText(error: unknown) {
   return error instanceof Error ? error.message : String(error);
-}
-
-function updatedReport(workspace: Workspace, manual = false): Workspace {
-  return { ...workspace, audit: workspace.versions.length
-    ? runAudit(workspace.clips, workspace.versions, workspace.checkedAt, manual ? null : workspace.audit)
-    : null };
 }
 
 function Guide({ onOffers, onAdd }: { onOffers: () => void; onAdd: () => void }) {
@@ -67,61 +73,102 @@ function Guide({ onOffers, onAdd }: { onOffers: () => void; onAdd: () => void })
 
 export function App() {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const [active, setActive] = useState('demo');
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [page, setPage] = useState<Page>('report');
   const [filter, setFilter] = useState<Verdict | 'all'>('all');
   const [selected, setSelected] = useState('');
   const [date, setDate] = useState('');
-  const [dialog, setDialog] = useState<'clip' | 'offers' | 'delete' | null>(null);
+  const [dialog, setDialog] = useState<'clip' | 'offers' | 'delete' | 'campaigns' | 'evidence' | null>(null);
   const [editing, setEditing] = useState<Clip>();
+  const [evidenceIndex, setEvidenceIndex] = useState<number | null>(null);
+  const [findingFocus, setFindingFocus] = useState('');
+  const todo = useMemo(() => workspace ? queueEntries(workspace).filter(row => reviewOpen(row.review)).length : 0, [workspace]);
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState<Notice | null>(null);
   const cancel = useRef<AbortController | null>(null);
   const importInput = useRef<HTMLInputElement>(null);
   const writing = useRef(false);
+  const opening = useRef(false);
 
-  async function open(demo: boolean) {
-    setBusy('Đang mở không gian làm việc…');
+  async function open(id: string) {
+    if (writing.current || opening.current) throw Error('Chờ thao tác hiện tại trước khi chuyển chiến dịch.');
+    opening.current = true;
+    setBusy('Đang mở chiến dịch…');
     try {
-      const data = await loadWorkspace(demo) ?? (demo ? sampleWorkspace() : emptyWorkspace());
+      const nextCampaigns = await listCampaigns();
+      const key = id === 'demo' || nextCampaigns.some(item => item.id === id) ? id : 'demo';
+      const saved = await loadWorkspace(key);
+      const data = prepareWorkspace(key === 'demo' ? refreshDemo(saved) : saved ?? emptyWorkspace());
+      setActive(key);
+      setCampaigns(nextCampaigns);
       setWorkspace(data);
       setDate(data.checkedAt);
       setPage('report');
       setFilter('all');
       setSelected(data.clips[0]?.id ?? '');
-      window.localStorage.setItem('ra-clip-mode', demo ? 'demo' : 'shop');
+      setFindingFocus('');
       setNotice(null);
-    } catch (error) {
-      setNotice({ text: `Không mở được bộ nhớ trình duyệt. ${errorText(error)}`, error: true });
-      setWorkspace(previous => previous ?? sampleWorkspace());
-      setDate(previous => previous || sampleWorkspace().checkedAt);
-    } finally { setBusy(''); }
+      try { window.localStorage.setItem('ra-clip-mode', key); } catch { /* Browser settings can block localStorage. */ }
+    } finally { opening.current = false; setBusy(''); }
+  }
+
+  function openFromPage(id: string) {
+    void open(id).catch(error => setNotice({ text: errorText(error), error: true }));
   }
 
   useEffect(() => {
-    let demo = true;
-    try { demo = window.localStorage.getItem('ra-clip-mode') !== 'shop'; }
-    catch { /* Browsers can disable storage. The demo can still be displayed. */ }
-    void open(demo);
+    let key = 'demo';
+    try { key = window.localStorage.getItem('ra-clip-mode') || 'demo'; }
+    catch { /* The demo still works without remembering the selected campaign. */ }
+    function blocked() {
+      setNotice({ text: 'Đóng tab Rà Clip bản cũ để cập nhật dữ liệu trên trình duyệt.', error: true });
+    }
+    window.addEventListener('ra-clip-storage-blocked', blocked);
+    void open(key).catch(error => {
+      const data = prepareWorkspace(sampleWorkspace());
+      setWorkspace(data);
+      setDate(data.checkedAt);
+      setNotice({ text: `Không mở được bộ nhớ trình duyệt. ${errorText(error)}`, error: true });
+    });
+    return () => window.removeEventListener('ra-clip-storage-blocked', blocked);
   }, []);
 
   async function persist(next: Workspace, media?: MediaChange[]) {
     if (writing.current) throw Error('Đang lưu thay đổi. Thử lại sau khi lưu xong.');
     writing.current = true;
     try {
-      await saveWorkspace(next, media);
-      setWorkspace(next);
+      const saved = await saveWorkspace(active, next, media);
+      setWorkspace(saved);
+      if (active !== 'demo') {
+        const current = saved.clips.length;
+        const openItems = queueEntries(saved).filter(row => reviewOpen(row.review)).length;
+        setCampaigns(items => items.map(item => item.id === active
+          ? { ...item, updatedAt: localTime(), clipCount: current, todoCount: openItems } : item));
+      }
     } finally { writing.current = false; }
   }
 
   function notify(text: string, error = false) { setNotice({ text, error }); }
   function startAdd() { setEditing(undefined); setDialog('clip'); }
-  function go(next: Page) { setPage(next); setFilter('all'); }
+  function go(next: Page) { setPage(next); setFilter('all'); setFindingFocus(''); }
+  function openFinding(clip: Clip, finding: Finding) {
+    setPage('report'); setFilter('all'); setSelected(clip.id); setFindingFocus(finding.id);
+    if (window.matchMedia('(max-width: 760px)').matches) {
+      requestAnimationFrame(() => document.getElementById('clip-evidence')?.scrollIntoView({ block: 'start' }));
+    }
+  }
+  function startEvidence(clip: Clip, index: number | null) {
+    setEditing(clip); setEvidenceIndex(index); setDialog('evidence');
+  }
   function startEdit(clip: Clip) { setEditing(clip); setDialog('clip'); }
   function startDelete(clip: Clip) { setEditing(clip); setDialog('delete'); }
   function clearDialog() { setDialog(null); setEditing(undefined); }
 
-  if (!workspace) return <div className="boot"><Brand /><p role="status">Đang mở Rà Clip…</p></div>;
+  if (!workspace) return <div className="boot"><Brand /><p role="status">Đang mở Rà Clip…</p>
+    {notice && <p className="form-error" role="alert">{notice.text}</p>}</div>;
   const data = workspace;
+  const campaign = campaigns.find(item => item.id === active);
   const version = data.versions.at(-1);
   const results = data.audit?.results ?? [];
   const resultIndex = new Map(results.map(row => [row.clipId, row]));
@@ -132,13 +179,45 @@ export function App() {
   const dateChanged = date !== data.checkedAt;
   const found = results.filter(row => leadVerdict(row.findings) === 'action').length;
 
+  async function launchCampaign(id: string) {
+    await open(id);
+    clearDialog();
+  }
+
+  async function addCampaign(draft: CampaignDraft) {
+    const created = await createCampaign(draft, emptyWorkspace());
+    await launchCampaign(created.id);
+    notify(`Đã tạo chiến dịch “${created.name}”.`);
+  }
+
+  async function changeCampaign(id: string, draft: CampaignDraft) {
+    await renameCampaign(id, draft);
+    setCampaigns(await listCampaigns());
+  }
+
+  async function exportCampaign(id: string) {
+    const details = campaigns.find(item => item.id === id);
+    if (!details) throw Error('Không tìm thấy thông tin chiến dịch.');
+    const saved = await loadWorkspace(id) ?? emptyWorkspace();
+    const file = await makeBackup({ name: details.name, shop: details.shop }, saved, loadMedia);
+    downloadBlob(file, `ra-clip-${localTime().slice(0, 10)}.raclip`);
+    notify('Đã tạo file sao lưu kèm video.');
+  }
+
+  async function restoreCampaign(file: File) {
+    const { draft, workspace, media } = await readBackup(file);
+    const restored = await createCampaign(draft, workspace, media);
+    await launchCampaign(restored.id);
+    notify(`Đã mở bản sao lưu thành chiến dịch riêng “${restored.name}”.`);
+  }
+
   async function newOffers(offers: Offer[]) {
     if (JSON.stringify(version?.offers) === JSON.stringify(offers)) {
       clearDialog();
       notify('Bảng ưu đãi giống phiên bản hiện tại.');
       return;
     }
-    const next = updatedReport({ ...data, versions: [...data.versions, { id: crypto.randomUUID(), at: localTime(), offers }] });
+    const next = updatedReport({ ...data, versions: [...data.versions, { id: crypto.randomUUID(), at: localTime(), offers }] }, 'offers');
     await persist(next);
     clearDialog();
     const count = next.audit?.refreshed.length ?? 0;
@@ -180,17 +259,19 @@ export function App() {
           media.push({ id, blob: file });
         }
         rows.push({
-          id, title: draft.title, sku: draft.sku, link: draft.link, published: draft.published,
+          id, title: draft.title, sku: draft.sku, link: draft.link, published: draft.published, format: draft.format,
           evidence: [...evidence, ...draft.evidence].sort((a, b) => a.start - b.start),
           localMedia: Boolean(draft.file || editing?.localMedia),
-          demoMedia: !draft.file && editing?.demoMedia,
+          demoMedia: draft.file ? undefined : editing?.demoMedia,
+          mediaRevision: draft.file ? crypto.randomUUID() : editing?.mediaRevision,
+          masks: draft.file ? [] : editing?.masks,
         });
       }
       controller.signal.throwIfAborted();
       const clips = editing ? data.clips.map(clip => clip.id === editing.id ? rows[0] : clip) : [...data.clips, ...rows];
       setBusy('Đang lưu video…');
       cancel.current = null;
-      await persist(updatedReport({ ...data, clips }), media);
+      await persist(updatedReport({ ...data, clips }, 'clips'), media);
       setSelected(rows[0].id);
       setFilter('all');
       if (page !== 'report') setPage('clips');
@@ -208,19 +289,17 @@ export function App() {
     setBusy('Đang mở video…');
     try {
       const blob = clip.localMedia ? await loadMedia(clip.id)
-        : await fetch(`${import.meta.env.BASE_URL}binh-500.webm`, { signal: controller.signal }).then(res => {
+        : await fetch(`${demoAsset(clip)}.webm`, { signal: controller.signal }).then(res => {
           if (!res.ok) throw Error('Chưa mở được video mẫu.');
           return res.blob();
         });
       if (!blob) throw Error('File video vắng mặt trong bộ nhớ trình duyệt.');
       const result = await analyzeVideo(blob, { audio: true, frame: true }, setBusy, controller.signal);
       if (!result.evidence.length) throw Error(result.notes.join(' · ') || 'Chưa trích được lời thoại hoặc chữ.');
-      const sources = new Set(result.evidence.map(row => row.source));
-      const evidence = [...clip.evidence.filter(row => !sources.has(row.source)), ...result.evidence].sort((a, b) => a.start - b.start);
-      const clips = data.clips.map(row => row.id === clip.id ? { ...row, evidence } : row);
+      const clips = data.clips.map(row => row.id === clip.id ? mergeScan(row, result.evidence) : row);
       setBusy('Đang lưu bằng chứng…');
       cancel.current = null;
-      await persist(updatedReport({ ...data, clips }));
+      await persist(updatedReport({ ...data, clips }, 'evidence'));
       notify(`Đã đọc ${result.evidence.length} đoạn.${result.notes.length ? ' ' + result.notes.join(' · ') : ''}`, result.notes.length > 0);
     } catch (error) { notify(controller.signal.aborted ? 'Đã dừng phân tích video.' : errorText(error), !controller.signal.aborted); }
     finally { setBusy(''); cancel.current = null; }
@@ -231,28 +310,47 @@ export function App() {
     setBusy('Đang xóa video…');
     try {
       const clips = data.clips.filter(clip => clip.id !== editing?.id);
-      const reviews = Object.fromEntries(Object.entries(data.reviews).filter(([key]) => {
+      const isOtherClip = ([key]: [string, unknown]) => {
         try { return JSON.parse(key)[0] !== editing.id; } catch { return false; }
-      }));
-      await persist(updatedReport({ ...data, clips, reviews }), [{ id: editing.id, blob: null }]);
+      };
+      const reviews = Object.fromEntries(Object.entries(data.reviews).filter(isOtherClip));
+      const notes = Object.fromEntries(Object.entries(data.notes ?? {}).filter(isOtherClip));
+      await persist(updatedReport({ ...data, clips, reviews, notes }, 'clips'), [{ id: editing.id, blob: null }]);
       clearDialog();
       notify('Đã xóa video khỏi kho.');
     } catch (error) { notify(errorText(error), true); }
     finally { setBusy(''); }
   }
 
-  async function review(id: string, value: Review | '') {
-    const reviews = { ...data.reviews };
-    if (value) reviews[id] = value;
-    else delete reviews[id];
-    try { await persist({ ...data, reviews }); }
-    catch (error) { notify(errorText(error), true); }
+  async function saveEvidence(value: Pick<Evidence, 'start' | 'end' | 'text'> | null) {
+    if (!editing) return;
+    const fixed = changeEvidence(editing, evidenceIndex, value);
+    const clips = data.clips.map(clip => clip.id === fixed.id ? fixed : clip);
+    await persist(updatedReport({ ...data, clips }, 'evidence'));
+    clearDialog();
+    notify(value ? 'Đã lưu đoạn trích và cập nhật kết quả.' : 'Đã xóa đoạn trích và cập nhật kết quả.');
+  }
+
+  async function review(ids: string[], value: Review | '') {
+    try {
+      await persist(setReviews(data, ids, value));
+      if (ids.length > 1) notify(`Đã cập nhật tiến độ ${ids.length} việc.`);
+      return true;
+    } catch (error) {
+      notify(errorText(error), true);
+      return false;
+    }
+  }
+
+  async function note(id: string, value: string) {
+    await persist(setFindingNote(data, id, value));
+    notify('Đã lưu ghi chú.');
   }
 
   async function runReport() {
     if (!version) { go('offers'); notify('Thêm bảng ưu đãi trước khi rà.'); return; }
     try {
-      const next = updatedReport({ ...data, checkedAt: date }, true);
+      const next = updatedReport({ ...data, checkedAt: date }, 'manual');
       await persist(next);
       notify(`Đã rà ${data.clips.length} video theo bảng v${data.versions.length}.`);
     } catch (error) { notify(errorText(error), true); }
@@ -260,7 +358,7 @@ export function App() {
 
   function exportReport() {
     if (data.audit) {
-      download(auditCsv(data.audit, data.clips, data.reviews), `ra-clip-${data.audit.checkedAt.slice(0, 10)}.csv`);
+      download(auditCsv(data.audit, data.clips, data.reviews, data.notes), `ra-clip-${data.audit.checkedAt.slice(0, 10)}.csv`);
       notify('Đã tạo file báo cáo CSV.');
     }
   }
@@ -270,19 +368,22 @@ export function App() {
       <div className="sidebar-top"><Brand />
         <div className="workspace-switch">
           <span className="workspace-icon"><Clapperboard size={18} /></span>
-          <div><strong>{data.demo ? 'Không gian mẫu' : 'Không gian của shop'}</strong>
-            <small>{data.demo ? 'Dữ liệu minh họa' : 'Dữ liệu trên máy'}</small></div>
+          <div className="workspace-name"><strong>{data.demo ? 'Không gian mẫu' : campaign?.name ?? 'Không gian của shop'}</strong>
+            <small>{data.demo ? 'Dữ liệu minh họa' : campaign?.shop || 'Dữ liệu trên máy'}</small></div>
           <ChevronDown size={13} />
           <label className="workspace-select"><span className="sr-only">Không gian làm việc</span>
-            <select aria-label="Không gian làm việc" value={data.demo ? 'demo' : 'shop'} disabled={!!busy}
-              onChange={event => void open(event.target.value === 'demo')}>
-              <option value="demo">Không gian mẫu</option><option value="shop">Không gian của shop</option>
+            <select aria-label="Không gian làm việc" value={active} disabled={!!busy}
+              onChange={event => openFromPage(event.target.value)}>
+              <option value="demo">Không gian mẫu</option>
+              {campaigns.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select>
           </label>
         </div>
+        <button type="button" className="campaign-picker" onClick={() => setDialog('campaigns')} disabled={!!busy}><FolderOpen size={16} /> Quản lý chiến dịch</button>
         <nav aria-label="Điều hướng chính">{pages.map(({ id, label, icon: Icon }) =>
           <button type="button" className={page === id ? 'on' : ''} aria-current={page === id ? 'page' : undefined} key={id} onClick={() => go(id)}>
-            <Icon size={18} /> <span>{label}</span>{page === id && <span className="nav-indicator" />}
+            <Icon size={18} /> <span>{label}</span>{id === 'queue' && todo > 0 && <small aria-hidden="true" className="nav-count">{todo}</small>}
+            {page === id && id !== 'queue' && <span className="nav-indicator" />}
           </button>)}</nav>
       </div>
       <div className="sidebar-bottom">
@@ -292,7 +393,7 @@ export function App() {
     </aside>
 
     <main className="main">
-      <header className="topbar"><div className="breadcrumb"><span>Không gian làm việc</span><span>/</span><strong>{pages.find(item => item.id === page)?.label}</strong></div>
+      <header className="topbar"><div className="breadcrumb"><span>{data.demo ? 'Không gian mẫu' : campaign?.name ?? 'Không gian của shop'}</span><span>/</span><strong>{pages.find(item => item.id === page)?.label}</strong></div>
         <div className="top-actions">
           <button className="button secondary" onClick={exportReport} disabled={!data.audit || !data.clips.length || !!busy}><ArrowDownToLine size={17} /> Xuất báo cáo</button>
           <button className="button primary" onClick={startAdd} disabled={!!busy}><Plus size={18} /> Thêm video</button>
@@ -306,12 +407,16 @@ export function App() {
         {data.demo && page === 'report' && <div className="demo-banner">
           <span className="demo-symbol"><SwitchCamera size={17} /></span>
           <div><strong>Đang xem dữ liệu mẫu</strong><span> · Thử mở một video hoặc sửa bảng ưu đãi.</span></div>
-          <button className="text-button" onClick={() => void open(false)} disabled={!!busy}>Dùng dữ liệu của bạn <ArrowRight size={16} /></button>
+          <button className="text-button" onClick={() => openFromPage('shop')} disabled={!!busy}>Dùng dữ liệu của bạn <ArrowRight size={16} /></button>
         </div>}
         {busy && !dialog && <div className="inline-status" role="status"><LoaderCircle size={17} className="spin" /> {busy}
           {cancel.current && <button className="text-button" onClick={() => cancel.current?.abort()}>Dừng</button>}
         </div>}
         {page === 'report' && <>
+          {todo > 0 && <div className="work-strip">
+            <div><ClipboardList size={19} /><span><strong>{todo} việc đang mở</strong><small>Xác nhận cảnh báo và lưu tiến độ.</small></span></div>
+            <button className="text-button" onClick={() => go('queue')}>Mở danh sách việc <ArrowRight size={16} /></button>
+          </div>}
           <section className="scan-bar" aria-label="Thiết lập rà soát">
             <div className="scan-info"><FileSpreadsheet size={19} /><span><strong>{version ? `Bảng ưu đãi · v${data.versions.length}` : 'Chưa có bảng ưu đãi'}</strong>
               <small>{version ? `${version.offers.length} dòng · ${found} video cần xử lý` : 'Nhập giá, voucher và quà tặng theo SKU'}</small></span></div>
@@ -328,12 +433,15 @@ export function App() {
           {page === 'report' && filter !== 'all' && <div className="filter-strip">Đang lọc: {verdictLabels[filter]}
             <button className="text-button" onClick={() => setFilter('all')}>Xóa bộ lọc <X size={14} /></button></div>}
           <ClipList key={page} clips={data.clips} results={resultIndex} filter={filter} selected={currentClip?.id ?? ''}
-            onSelect={setSelected} onAdd={startAdd} library={page === 'clips'} ready={!!data.audit} />
-          <ClipDetail key={currentClip?.id ?? 'empty'} clip={currentClip} result={currentClip && resultIndex.get(currentClip.id)}
-            reviews={data.reviews} onReview={(id, value) => void review(id, value)} onEdit={startEdit} onDelete={startDelete}
+            onSelect={id => { setSelected(id); setFindingFocus(''); }} onAdd={startAdd} library={page === 'clips'} ready={!!data.audit} />
+          <ClipDetail key={(currentClip?.id ?? 'empty') + findingFocus} clip={currentClip} result={currentClip && resultIndex.get(currentClip.id)}
+            focusedFinding={findingFocus} reviews={data.reviews} notes={data.notes} onReview={(id, value) => void review([id], value)}
+            onEdit={startEdit} onDelete={startDelete} onEvidence={startEvidence}
             onScan={clip => void rescan(clip)} busy={!!busy} />
         </div>}
-        {page === 'offers' && <OffersView versions={data.versions} onImport={() => importInput.current?.click()}
+        {page === 'queue' && <QueueView workspace={data} onOpen={openFinding} onReview={review} onNote={note} busy={!!busy} />}
+        {page === 'history' && <HistoryView snapshots={data.snapshots ?? []} onReport={() => go('report')} />}
+        {page === 'offers' && <OffersView versions={data.versions} clips={data.clips} onImport={() => importInput.current?.click()}
           onEdit={() => setDialog('offers')} busy={!!busy} />}
         {page === 'guide' && <Guide onOffers={() => go('offers')} onAdd={startAdd} />}
       </div>
@@ -346,6 +454,10 @@ export function App() {
       }} />
     {dialog === 'clip' && <ClipDialog clip={editing} skus={[...new Set(version?.offers.map(row => row.sku) ?? [])]}
       onClose={clearDialog} onSave={saveClips} busy={busy} onCancel={() => cancel.current?.abort()} />}
+    {dialog === 'campaigns' && <CampaignManager items={campaigns} active={active} onOpen={launchCampaign}
+      onCreate={addCampaign} onRename={changeCampaign} onBackup={exportCampaign} onRestore={restoreCampaign} onClose={clearDialog} />}
+    {dialog === 'evidence' && <EvidenceDialog row={evidenceIndex === null ? undefined : editing?.evidence[evidenceIndex]}
+      onSave={saveEvidence} onClose={clearDialog} />}
     {dialog === 'offers' && <OfferDialog offers={version?.offers ?? []} onClose={clearDialog} onSave={newOffers} />}
     {dialog === 'delete' && <Modal title="Xóa video?" detail={editing?.title} busy={!!busy} onClose={clearDialog}>
       <p className="delete-description">File video, phụ đề và phản hồi của clip này sẽ bị xóa khỏi trình duyệt.</p>

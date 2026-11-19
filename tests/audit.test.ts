@@ -30,6 +30,11 @@ describe('Evidence extraction', () => {
     expect(claims.map(row => row.value)).toEqual([expected]);
   });
 
+  it('ignores the order threshold and reconstructs a spaced known voucher', () => {
+    const claims = extractClaims(clip('Còn 99k khi áp mã SALE 99. Hóa đơn tối thiểu 199k.'), [offer]);
+    expect(claims.map(({ kind, value }) => [kind, value])).toEqual([['code', 'SALE99'], ['price', 99000]]);
+  });
+
   it('joins price and known voucher between nearby evidence', () => {
     const item = clip('Còn 99k!');
     item.evidence.push({ start: 5, end: null, text: 'Áp mã SALE99', source: 'frame' });
@@ -84,14 +89,14 @@ describe('Audit decisions and versions', () => {
     const amended = before.offers.map(row => row.sku === 'TUI-KEM' ? { ...row, price: 149000 } : row);
     expect([...changedSkus(before.offers, amended)]).toEqual(['TUI-KEM']);
     const next = runAudit(data.clips, [...data.versions, version(amended, 'v3')], data.checkedAt, data.audit);
-    expect(next.refreshed).toEqual(['sample-three', 'sample-five']);
+    expect(next.refreshed).toEqual(['demo-canvas']);
     expect(next.results[0]).toBe(data.audit?.results[0]);
-    expect(next.results[2].findings[0].verdict).toBe('action');
+    expect(next.results.find(row => row.clipId === 'demo-canvas')?.findings[0].verdict).toBe('action');
   });
 
   it('rechecks all clips when the audit time changes', () => {
     const data = sampleWorkspace();
-    expect(runAudit(data.clips, data.versions, '2026-11-10T12:00', data.audit).refreshed).toHaveLength(5);
+    expect(runAudit(data.clips, data.versions, '2026-11-10T12:00', data.audit).refreshed).toHaveLength(data.clips.length);
   });
 
   it('distinguishes removed vouchers from missing data', () => {

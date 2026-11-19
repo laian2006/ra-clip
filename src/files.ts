@@ -1,7 +1,7 @@
 import { validateOffers } from './audit';
 import { fold } from './claims';
 import { kindLabels, reviewLabels, sourceLabels, timestamp, verdictLabels } from './domain';
-import type { Audit, Clip, Evidence, Offer, Review } from './domain';
+import type { Audit, ClipSummary, Evidence, Offer, Review } from './domain';
 import { dateInput } from './time';
 
 const headers = ['sku', 'name', 'voucher', 'price', 'gift', 'start', 'end', 'condition'];
@@ -174,7 +174,7 @@ export function offersCsv(offers: Offer[]) {
   ])]);
 }
 
-export function auditCsv(audit: Audit, clips: Clip[], reviews: Record<string, Review>) {
+export function auditCsv(audit: Audit, clips: ClipSummary[], reviews: Record<string, Review>, notes: Record<string, string> = {}) {
   const index = new Map(clips.map(row => [row.id, row]));
   const rows = audit.results.flatMap(result => {
     const clip = index.get(result.clipId);
@@ -183,15 +183,19 @@ export function auditCsv(audit: Audit, clips: Clip[], reviews: Record<string, Re
       clip.title, clip.sku, clip.link, finding.evidence ? timestamp(finding.evidence.start) : '',
       kindLabels[finding.kind], verdictLabels[finding.verdict], finding.claim,
       finding.evidence ? sourceLabels[finding.evidence.source] : '', finding.evidence?.text ?? '',
-      finding.reference, finding.reason, reviews[finding.id] ? reviewLabels[reviews[finding.id]] : '', audit.checkedAt,
+      finding.reference, finding.reason, reviews[finding.id] ? reviewLabels[reviews[finding.id]] : '', notes[finding.id] ?? '', audit.checkedAt,
     ]);
   });
   return csv([['Video', 'SKU', 'Link', 'Mốc thời gian', 'Nhóm', 'Kết quả', 'Thông tin trong clip',
-    'Nguồn', 'Bằng chứng', 'Bảng ưu đãi', 'Lý do', 'Phản hồi', 'Thời điểm rà (UTC+7)'], ...rows]);
+    'Nguồn', 'Bằng chứng', 'Bảng ưu đãi', 'Lý do', 'Phản hồi', 'Ghi chú', 'Thời điểm rà (UTC+7)'], ...rows]);
 }
 
 export function download(text: string, name: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
+  downloadBlob(new Blob([text], { type: 'text/csv;charset=utf-8' }), name);
+}
+
+export function downloadBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = name;

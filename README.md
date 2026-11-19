@@ -1,6 +1,6 @@
 # Rà Clip
 
-Rà lại video bán hàng sau khi giá, voucher hoặc quà tặng thay đổi. Ứng dụng đọc lời thoại và chữ trên video tiếng Việt, đối chiếu theo mã phân loại sản phẩm (SKU), rồi chỉ ra đoạn cần xem trong clip.
+Rà lại video bán hàng sau khi giá, voucher hoặc quà tặng thay đổi. Ứng dụng đọc lời thoại và chữ tiếng Việt trong video, đối chiếu theo mã phân loại sản phẩm (SKU) và chỉ ra đoạn cần xem.
 
 ![Màn hình rà soát với dữ liệu mẫu](docs/giao-dien.png)
 
@@ -13,27 +13,32 @@ npm ci
 npm run dev
 ```
 
-Mở địa chỉ Vite in ra, thường là `http://127.0.0.1:5173`. App mở với kho mẫu gồm 5 clip và 2 phiên bản ưu đãi. Chọn **Dùng dữ liệu của bạn** để mở kho riêng.
+Mở địa chỉ Vite in ra, thường là `http://127.0.0.1:5173`. App mở với **9 video dọc có thể phát**, lời thoại tiếng Việt, phụ đề và 2 phiên bản bảng ưu đãi. Dữ liệu và video được dựng để tái hiện tình huống shop có thể gặp sau sale.
 
-### Demo nhanh
+### Thử nhanh với video mẫu
 
-1. Trong **Rà soát**, mở clip **Bình giữ nhiệt 500 ml** rồi bấm **00:05** để tới lời quảng bá voucher đã hết hạn.
-2. Trong **Bảng ưu đãi**, đổi giá SKU `TUI-KEM` từ 129.000 thành 149.000, rồi chọn **Lưu phiên bản**. Hai clip gắn SKU đó được rà lại. Các SKU khác giữ kết quả cũ cho cùng thời điểm rà.
-3. Quay lại **Rà soát**, mở **Túi canvas đi học**, ghi nhận **Mới phát hiện** và **Xuất báo cáo**. CSV ghi mốc thời gian, câu gốc, dữ liệu tham chiếu và phản hồi.
+1. Mở **Kho video**, chọn **Cắt livestream**, rồi mở clip quạt mini. Đoạn **00:05** hiển thị giá 79k với mã đã hết hạn. Mức 199k ở đoạn sau là ngưỡng đơn để dùng mã.
+2. Trong **Bảng ưu đãi**, chọn **So sánh phiên bản** để thấy áo navy đổi từ 139.000đ lên 159.000đ và combo ly bỏ quà tặng.
+3. Mở **Việc cần làm**, lọc theo SKU, ghi chú và bấm tên video để về đúng phát hiện. Trong **Đoạn trích**, có thể xem, thêm, sửa và xóa từng đoạn lời thoại hoặc OCR.
+4. Mở **Nhật ký rà** để tải lại báo cáo theo từng lần rà. Nhật ký hiện clip mới cần kiểm tra hoặc đã hết dấu hiệu giữa hai lần rà.
 
-### Dùng với dữ liệu thật
+Danh sách 9 tình huống và mốc kiểm tra có trong [kho video mẫu](docs/video-mau.md).
 
-- **Bảng ưu đãi:** nhập trang đầu của file XLSX hoặc file CSV/TSV có các cột `sku, name, voucher, price, gift, start, end, condition`. Có thể tải mẫu CSV trong app. Mỗi cặp SKU và voucher là một dòng. Dòng không có mã đại diện cho giá/ưu đãi thông thường. Giá nhập theo VNĐ. Ngày nhận `YYYY-MM-DD`, `DD/MM/YYYY` hoặc ngày kèm giờ. Ứng dụng hiểu giờ Việt Nam (UTC+7).
-- **Video:** nhập file MP4, WebM, M4V hoặc MOV mà trình duyệt đọc được, tối đa 150 MB và 2 phút mỗi file. Có thể thêm tối đa 20 file một lượt. Gán SKU và ngày đăng nếu có. Dùng phụ đề SRT/VTT hoặc ghi chú như `00:05 Còn 99k khi áp mã SALE99.` để rà ngay khi chưa tải mô hình. Link bài đăng dùng để mở clip gốc.
-- **Rà soát:** chọn thời điểm, xem cảnh báo, đánh dấu phản hồi và tải CSV. Khi lưu bảng mới, app chỉ tính lại SKU đổi và clip có dữ liệu mới. Khi đổi thời điểm, app tính lại tất cả.
+## Dùng cho đợt sale thật
+
+- **Chiến dịch:** mở **Quản lý chiến dịch** để tạo hoặc đổi tên từng đợt sale. Mỗi chiến dịch có kho video, bảng ưu đãi, phản hồi và nhật ký riêng. Chọn **Dùng dữ liệu của bạn** để vào không gian mặc định. Dữ liệu đã lưu bằng phiên bản 1.0 vẫn mở trong không gian này.
+- **Bảng ưu đãi:** nhập trang đầu của XLSX hoặc file CSV/TSV có các cột `sku, name, voucher, price, gift, start, end, condition`. Dùng mẫu CSV trong app. Mỗi cặp SKU và voucher là một dòng. Dòng không có mã đại diện cho giá hoặc ưu đãi thông thường. Giá tính bằng VNĐ, thời hạn dùng giờ Việt Nam (UTC+7).
+- **Kho video:** thêm MP4, WebM, M4V hoặc MOV mà trình duyệt đọc được, tối đa 150 MB và 2 phút mỗi file, tối đa 20 file mỗi lượt. Gán SKU, ngày đăng và kiểu video. Có thể dùng phụ đề SRT/VTT hoặc ghi chú như `00:05 Còn 99k khi áp mã SALE99.`
+- **Rà và xử lý:** chọn thời điểm, sửa các đoạn AI đọc nhầm, đánh dấu việc riêng lẻ hoặc hàng loạt rồi tải CSV. Khi lưu bảng mới, app chỉ tính lại SKU đã đổi hoặc clip có dữ liệu mới. Khi đổi thời điểm, app tính lại toàn bộ kho. Nhật ký lưu tối đa 40 báo cáo gần nhất.
+- **Sao lưu:** tải file `.raclip` từ màn hình quản lý, kèm video đã nhập, ưu đãi, đoạn trích, ghi chú và báo cáo. Mở file để tạo một chiến dịch riêng. Mỗi bản sao lưu hỗ trợ tối đa 1 GB.
 
 ## Cách hoạt động
 
-`src/media.ts` đọc và lấy mẫu khung hình trong trình duyệt. `src/speech.worker.ts` chạy PhoWhisper Base tinh chỉnh cho tiếng Việt bằng WebAssembly trong Web Worker. OCR dùng Tesseract với tiếng Việt và tiếng Anh. `src/claims.ts` trích giá, voucher, quà tặng và mốc trong câu. `src/audit.ts` đối chiếu các đoạn đó với phiên bản ưu đãi và giữ dấu vết theo từng clip. IndexedDB lưu file video, đoạn nhận dạng, các phiên bản và phản hồi.
+`src/media.ts` lấy mẫu khung hình trong trình duyệt. `src/speech.worker.ts` chạy PhoWhisper Base tinh chỉnh cho tiếng Việt bằng WebAssembly trong Web Worker. OCR dùng Tesseract tiếng Việt và tiếng Anh. `src/claims.ts` trích giá, voucher, quà tặng và thời hạn. `src/audit.ts` đối chiếu theo SKU và phiên bản ưu đãi. IndexedDB lưu file video và dữ liệu của từng chiến dịch.
 
-Lần đầu dùng lời thoại, trình duyệt tải mô hình khoảng 80 MB từ Hugging Face. OCR dùng tệp ngôn ngữ đi cùng app. File và nội dung video được xử lý tại chỗ. Dữ liệu demo tách khỏi dữ liệu shop và toàn bộ dữ liệu được lưu trong hồ sơ trình duyệt đang dùng.
+Lần đầu dùng lời thoại, trình duyệt tải mô hình khoảng 80 MB từ Hugging Face. OCR dùng các gói đi cùng app. Nội dung video được xử lý tại chỗ. Xóa dữ liệu trang trong trình duyệt sẽ xóa các chiến dịch chưa sao lưu.
 
-Kết quả phản ánh **bảng shop nhập tại thời điểm rà**. Giá theo từng tài khoản hoặc điều kiện thanh toán cần dữ liệu tương ứng. Nhận dạng có thể bỏ sót chữ xuất hiện ngắn, đọc nhầm tiếng Việt có nhạc nền, hoặc gặp câu mơ hồ khi một SKU có nhiều ưu đãi. Dùng trạng thái **Cần xác nhận** và đoạn video gốc để kiểm tra trước khi sửa nội dung. Xóa dữ liệu trang trong trình duyệt sẽ xóa kho cùng báo cáo đang lưu trên thiết bị đó.
+Kết quả phản ánh bảng shop nhập tại thời điểm rà. Giá theo từng khách hoặc điều kiện thanh toán cần dữ liệu tương ứng. AI có thể bỏ sót chữ xuất hiện trong thời gian ngắn hoặc đọc sai lời thoại có nhạc nền. Dùng clip gốc và trạng thái **Cần xác nhận** để kiểm tra các đoạn mơ hồ.
 
 ## Kiểm thử
 
@@ -44,6 +49,6 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-Bộ kiểm thử kiểm tra cách đọc tiếng Việt, ngày hết hạn UTC+7, nhập Excel, đối chiếu các phiên bản, phản hồi, phát đúng giây, OCR và xuất CSV. Bài kiểm thử PhoWhisper dùng tải mô hình mạng ngoài và có thể bật bằng biến môi trường `RA_CLIP_TEST_MODELS=1`. Có thể chọn trình duyệt Microsoft Edge đã cài bằng `RA_CLIP_BROWSER=msedge`.
+Kiểm thử bao gồm nhập Excel, báo cáo CSV, sửa đoạn trích, phát video mẫu, cập nhật theo SKU, nhật ký, sao lưu video và chuyển dữ liệu từ bản cũ. Bật `RA_CLIP_TEST_MODELS=1` để tải và thử PhoWhisper trong trình duyệt. Có thể chọn Edge đã cài bằng `RA_CLIP_BROWSER=msedge`.
 
-Mã nguồn theo [MIT](LICENSE). Ảnh sản phẩm, nội dung clip và dữ liệu mẫu được tạo riêng cho demo. Giọng demo dùng Piper VAIS1000 với lời thoại tổng hợp. [Ghi chú về mô hình và dữ liệu](THIRD_PARTY.md)
+Mã nguồn theo [MIT](LICENSE). Hình ảnh, lời thoại và dữ liệu video minh họa được tạo riêng cho demo. [Ghi chú về thành phần bên thứ ba](THIRD_PARTY.md)

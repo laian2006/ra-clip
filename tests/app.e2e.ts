@@ -6,9 +6,9 @@ test('demo filters, seeks, remembers feedback and exports CSV', async ({ page })
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Rà soát video sau sale' })).toBeVisible();
-  await expect(page.locator('.clip-row')).toHaveCount(5);
+  await expect(page.locator('.clip-row')).toHaveCount(9);
   await page.getByRole('button', { name: /Cần xử lý/ }).filter({ has: page.locator('.metric-bottom') }).click();
-  await expect(page.locator('.clip-row')).toHaveCount(2);
+  await expect(page.locator('.clip-row')).toHaveCount(4);
   await page.getByRole('button', { name: '00:05', exact: true }).click();
   await expect.poll(() => page.locator('video').evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThanOrEqual(4.8);
   await page.getByRole('combobox', { name: 'Phản hồi của shop' }).selectOption('new');

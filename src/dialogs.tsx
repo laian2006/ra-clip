@@ -1,14 +1,14 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { ArrowUpFromLine, CircleAlert, CirclePlus, FileText, LoaderCircle, Trash2 } from 'lucide-react';
-import { normalizeCode, safeLink } from './domain';
-import type { Clip, Evidence, Offer } from './domain';
+import { clipFormats, normalizeCode, safeLink } from './domain';
+import type { Clip, ClipFormat, Evidence, Offer } from './domain';
 import { readPrice, readSubtitles } from './files';
 import { validateOffers } from './audit';
 import { type ScanOptions, validateVideo } from './media';
 import { Modal } from './ui';
 
 export interface DraftClip {
-  title: string; sku: string; link: string; published: string; evidence: Evidence[]; file: File | null;
+  title: string; sku: string; link: string; published: string; format?: ClipFormat; evidence: Evidence[]; file: File | null;
 }
 
 export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
@@ -23,6 +23,7 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
   const [sku, setSku] = useState(clip?.sku ?? '');
   const [link, setLink] = useState(clip?.link ?? '');
   const [published, setPublished] = useState(clip?.published ?? '');
+  const [format, setFormat] = useState<ClipFormat | ''>(clip?.format ?? '');
   const [files, setFiles] = useState<File[]>([]);
   const [fileSkus, setFileSkus] = useState<string[]>([]);
   const [subtitles, setSubtitles] = useState('');
@@ -58,7 +59,7 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
       const drafts = selections.map((file, index) => ({
         title: (!many && title.trim()) || file?.name.replace(/\.[^.]+$/, '') || '',
         sku: normalizeCode(fileSkus[index]?.trim() || sku),
-        link: many ? '' : url, published, evidence, file,
+        link: many ? '' : url, published, format: format || undefined, evidence, file,
       }));
       if (drafts.some(item => !item.title)) throw Error('Nhập tên video.');
       if (drafts.some(item => item.title.length > 140)) throw Error('Tên video tối đa 140 ký tự.');
@@ -95,6 +96,10 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
         <datalist id="clip-skus">{skus.map(value => <option key={value} value={value} />)}</datalist>
         {!many && <label>Link bài đăng<input type="url" value={link} onChange={event => setLink(event.target.value)} placeholder="https://…" disabled={!!busy} /></label>}
         <label>Ngày đăng<input type="date" value={published} onChange={event => setPublished(event.target.value)} disabled={!!busy} /></label>
+        <label>Kiểu video<select value={format} disabled={!!busy} onChange={event => setFormat(event.target.value as typeof format)}>
+          <option value="">Chưa chọn kiểu</option>
+          {Object.entries(clipFormats).map(([key, name]) => <option value={key} key={key}>{name}</option>)}
+        </select></label>
       </div>
       {files.length > 0 && <fieldset className="scan-options"><legend>Phân tích trên thiết bị</legend>
         <label><input type="checkbox" checked={audio} onChange={event => setAudio(event.target.checked)} disabled={!!busy} /> Lời thoại</label>

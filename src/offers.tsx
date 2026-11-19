@@ -1,21 +1,43 @@
-import { Clock3, Download, FileSpreadsheet, History, Pencil, Upload } from 'lucide-react';
+import { ArrowRight, Clock3, Download, FileSpreadsheet, History, Pencil, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { displayDate, money, offerKey } from './domain';
-import type { OfferVersion } from './domain';
+import type { Clip, Offer, OfferVersion } from './domain';
 import { csv, download, offersCsv, templateRows } from './files';
-import { changedSkus } from './audit';
+import { changedSkus, compareOffers, type OfferField } from './audit';
 import { Empty } from './ui';
 
-export function OffersView({ versions, onImport, onEdit, busy }: {
-  versions: OfferVersion[]; onImport: () => void; onEdit: () => void; busy: boolean;
+const fieldNames: Record<OfferField, string> = {
+  name: 'Tên sản phẩm', price: 'Giá', gift: 'Quà tặng',
+  start: 'Bắt đầu', end: 'Kết thúc', condition: 'Điều kiện',
+};
+
+function fieldValue(field: OfferField, offer?: Offer) {
+  const value = offer?.[field];
+  if (value === null || value === undefined || value === '') return '—';
+  if (typeof value === 'number') return money(value);
+  if (field === 'start' || field === 'end') {
+    return displayDate(value) + (value.length > 10 ? ' · ' + value.slice(11) : '');
+  }
+  return value;
+}
+
+export function OffersView({ versions, clips, onImport, onEdit, busy }: {
+  versions: OfferVersion[]; clips: Clip[]; onImport: () => void; onEdit: () => void; busy: boolean;
 }) {
   const [viewId, setView] = useState('');
+  const [tab, setTab] = useState<'table' | 'diff'>('table');
+  const [comparisonId, setComparison] = useState('');
   const current = versions.at(-1);
   const viewing = versions.find(row => row.id === viewId) ?? current;
   useEffect(() => setView(''), [current?.id]);
   const index = viewing ? versions.indexOf(viewing) : -1;
   const previous = versions[index - 1];
   const changed = previous && viewing ? changedSkus(previous.offers, viewing.offers).size : 0;
+  const comparison = versions.find(row => row.id === comparisonId && row.id !== viewing?.id) ??
+    previous ?? versions.find(row => row.id !== viewing?.id);
+  const changes = comparison && viewing ? compareOffers(comparison.offers, viewing.offers) : [];
+  const impacted = new Set(changes.map(row => row.sku));
+  const affectedClips = clips.filter(clip => impacted.has(clip.sku)).length;
   return <div className="offer-layout">
     <section className="panel">
       <div className="panel-heading offers-header">
@@ -28,7 +50,28 @@ export function OffersView({ versions, onImport, onEdit, busy }: {
           <button className="button primary" disabled={busy} onClick={onEdit}><Pencil size={16} /> {current ? 'Sửa bảng' : 'Tạo bảng'}</button>
         </div>
       </div>
-      {viewing ? <>
+      {viewing && versions.length > 1 && <div className="ops-toolbar offer-tabs">
+        <div className="segmented" aria-label="Chế độ xem bảng">
+          <button type="button" className={tab === 'table' ? 'active' : ''} aria-pressed={tab === 'table'} onClick={() => setTab('table')}>Dữ liệu ưu đãi</button>
+          <button type="button" className={tab === 'diff' ? 'active' : ''} aria-pressed={tab === 'diff'} onClick={() => setTab('diff')}>So sánh phiên bản</button>
+        </div>
+      </div>}
+      {viewing && tab === 'diff' && comparison ? <div className="diff-view">
+        <div className="diff-summary"><label>So với <select aria-label="Phiên bản đối chiếu" value={comparison.id} onChange={event => setComparison(event.target.value)}>
+          {versions.map((row, i) => row.id !== viewing.id && <option key={row.id} value={row.id}>v{i + 1} · {displayDate(row.at)}</option>)}
+        </select></label><span>{changes.length} dòng thay đổi · {impacted.size} SKU · {affectedClips} video liên quan</span></div>
+        {changes.length ? <div className="diff-list">{changes.map(row =>
+          <article className="diff-row" key={row.key}>
+            <div className="diff-title"><strong>{row.sku}</strong><span>{row.code || 'Giá thường'}</span>
+              <span className={`diff-badge ${!row.before ? 'added' : !row.after ? 'removed' : 'modified'}`}>
+                {!row.before ? 'Dòng mới' : !row.after ? 'Đã bỏ' : 'Đã sửa'}</span></div>
+            <dl>{row.fields.filter(field => row.before && row.after ||
+              (row.before ?? row.after)?.[field] !== '' && (row.before ?? row.after)?.[field] !== null).map(field =>
+              <div key={field}><dt>{fieldNames[field]}</dt><dd><span>{fieldValue(field, row.before)}</span>
+                <ArrowRight size={14} /><strong>{fieldValue(field, row.after)}</strong></dd></div>)}</dl>
+          </article>)}</div>
+          : <p className="empty-inline">Hai phiên bản có cùng các dòng ưu đãi.</p>}
+      </div> : viewing ? <>
         <div className="table-wrap"><table>
           <thead><tr><th scope="col">Sản phẩm</th><th scope="col">Voucher</th><th scope="col">Giá</th><th scope="col">Quà tặng</th><th scope="col">Thời hạn</th><th scope="col">Điều kiện</th></tr></thead>
           <tbody>{viewing.offers.map(row => <tr key={offerKey(row)}>

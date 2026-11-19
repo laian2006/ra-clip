@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { AlertCircle, Check, CircleHelp, Clock4, FileVideo, ScanLine, X } from 'lucide-react';
 import { kindLabels, timestamp, verdictLabels } from './domain';
 import type { Clip, Finding, Verdict } from './domain';
+import { demoAsset } from './demo';
 
 export const verdictIcons = { action: AlertCircle, review: CircleHelp, dated: Clock4, clear: Check };
 
@@ -47,7 +48,7 @@ export function Modal({ title, detail, children, busy = false, onClose }: {
 export function ClipGlyph({ clip }: { clip: Clip }) {
   return <span className={`clip-glyph ${clip.demoMedia ? 'photo' : ''}`}>
     {clip.demoMedia ?
-      <img alt="" src={`${import.meta.env.BASE_URL}binh-500.webp`} /> :
+      <img alt="" src={`${demoAsset(clip)}.webp`} loading="lazy" /> :
       <FileVideo size={19} />}
   </span>;
 }

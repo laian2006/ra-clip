@@ -5,7 +5,7 @@ import { extractClaims } from '../src/claims';
 async function mediaEvidence(page: Page) {
   return page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('ra-clip', 1);
+      const request = indexedDB.open('ra-clip');
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });

@@ -14,7 +14,21 @@ export interface Evidence {
   end: number | null;
   text: string;
   source: 'audio' | 'frame' | 'subtitle' | 'manual';
+  corrected?: boolean;
 }
+
+export type MediaSource = Extract<Evidence['source'], 'audio' | 'frame'>;
+export interface EvidenceMask {
+  source: MediaSource;
+  start: number;
+  end: number | null;
+}
+
+export const clipFormats = {
+  review: 'Review sản phẩm', live: 'Cắt livestream', unbox: 'Mở hộp',
+  combo: 'Combo', affiliate: 'Video gắn giỏ', promo: 'Video khuyến mãi',
+} as const;
+export type ClipFormat = keyof typeof clipFormats;
 
 export interface Clip {
   id: string;
@@ -22,9 +36,12 @@ export interface Clip {
   sku: string;
   link: string;
   published: string;
+  format?: ClipFormat;
   evidence: Evidence[];
   localMedia: boolean;
-  demoMedia?: boolean;
+  demoMedia?: boolean | string;
+  mediaRevision?: string;
+  masks?: EvidenceMask[];
 }
 
 export interface OfferVersion {
@@ -70,13 +87,44 @@ export interface Audit {
   refreshed: string[];
 }
 
+export type AuditTrigger = 'manual' | 'offers' | 'clips' | 'evidence' | 'baseline';
+
+export type ClipSummary = Pick<Clip, 'id' | 'title' | 'sku' | 'link'>;
+
+export interface AuditSnapshot {
+  id: string;
+  recordedAt: string;
+  trigger: AuditTrigger;
+  versionNumber: number;
+  audit: Audit;
+  clips: ClipSummary[];
+  reviews: Record<string, Review>;
+  notes: Record<string, string>;
+}
+
+export interface Campaign {
+  id: string;
+  name: string;
+  shop: string;
+  createdAt: string;
+  updatedAt: string;
+  clipCount: number;
+  todoCount: number;
+}
+
+export type CampaignDraft = Pick<Campaign, 'name' | 'shop'>;
+
 export interface Workspace {
   demo: boolean;
+  demoPack?: number;
   clips: Clip[];
   versions: OfferVersion[];
   checkedAt: string;
   audit: Audit | null;
   reviews: Record<string, Review>;
+  notes?: Record<string, string>;
+  snapshots?: AuditSnapshot[];
+  revision?: string;
 }
 
 export const verdictLabels: Record<Verdict, string> = {
