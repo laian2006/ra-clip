@@ -21,8 +21,8 @@ function fieldValue(field: OfferField, offer?: Offer) {
   return value;
 }
 
-export function OffersView({ versions, clips, onImport, onEdit, busy }: {
-  versions: OfferVersion[]; clips: Clip[]; onImport: () => void; onEdit: () => void; busy: boolean;
+export function OffersView({ versions, clips, onImport, onEdit, onNext, busy }: {
+  versions: OfferVersion[]; clips: Clip[]; onImport: () => void; onEdit: () => void; onNext?: () => void; busy: boolean;
 }) {
   const [viewId, setView] = useState('');
   const [tab, setTab] = useState<'table' | 'diff'>('table');
@@ -50,6 +50,10 @@ export function OffersView({ versions, clips, onImport, onEdit, busy }: {
           <button className="button primary" disabled={busy} onClick={onEdit}><Pencil size={16} /> {current ? 'Sửa bảng' : 'Tạo bảng'}</button>
         </div>
       </div>
+      {current && onNext && <div className="offer-next">
+        <p>Bảng đã sẵn sàng. Thêm video có cùng mã sản phẩm (SKU) để app đối chiếu.</p>
+        <button className="button primary" type="button" disabled={busy} onClick={onNext}>Thêm video để rà <ArrowRight size={16} aria-hidden="true" /></button>
+      </div>}
       {viewing && versions.length > 1 && <div className="ops-toolbar offer-tabs">
         <div className="segmented" aria-label="Chế độ xem bảng">
           <button type="button" className={tab === 'table' ? 'active' : ''} aria-pressed={tab === 'table'} onClick={() => setTab('table')}>Dữ liệu ưu đãi</button>
@@ -86,7 +90,7 @@ export function OffersView({ versions, clips, onImport, onEdit, busy }: {
           <span><Clock3 size={15} /> {previous ? `${changed} SKU đổi so với v${index}` : 'Phiên bản đầu tiên'}</span>
           <button className="text-button" onClick={() => download(offersCsv(viewing.offers), `uu-dai-v${index + 1}.csv`)}><Download size={15} /> Xuất bảng này</button>
         </div>
-      </> : <Empty title="Chưa có bảng ưu đãi" detail="Bắt đầu bằng file mẫu hoặc nhập trực tiếp từng SKU." />}
+      </> : <Empty title="Chưa có bảng ưu đãi" detail="Có sẵn file của shop? Chọn Nhập bảng. Bạn cũng có thể tải mẫu hoặc chọn Tạo bảng để điền trực tiếp." />}
     </section>
     <aside className="panel history">
       <div className="panel-heading"><div><h2><History size={19} /> Lịch sử</h2><p>{versions.length} phiên bản</p></div></div>

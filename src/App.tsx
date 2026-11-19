@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDownToLine, ArrowRight, ArrowUpRight, BookOpen, CheckCircle2, ChevronDown, CircleAlert,
   CircleHelp, Clapperboard, ClipboardList, FileSpreadsheet, Film, FolderOpen, Github, History, LayoutDashboard, LoaderCircle,
-  Plus, ScanLine, ShieldCheck, SwitchCamera, Upload, X,
+  Plus, ScanLine, ShieldCheck, Upload, X,
 } from 'lucide-react';
 import { ClipDetail, ClipList, Metrics } from './dashboard';
 import { CampaignManager } from './campaigns';
@@ -24,6 +24,7 @@ import { auditCsv, download, downloadBlob, importOffers } from './files';
 import { analyzeVideo, videoMetadata, type ScanOptions } from './media';
 import { emptyWorkspace, refreshDemo, sampleWorkspace } from './demo';
 import { OffersView } from './offers';
+import { DemoStart, ShopStart } from './start';
 import { createCampaign, listCampaigns, loadMedia, loadWorkspace, renameCampaign, saveWorkspace, type MediaChange } from './storage';
 import { Brand, Modal } from './ui';
 
@@ -56,7 +57,7 @@ function errorText(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function Guide({ onOffers, onAdd }: { onOffers: () => void; onAdd: () => void }) {
+function Guide({ onOffers, onAdd, onReport }: { onOffers: () => void; onAdd: () => void; onReport: () => void }) {
   return <section className="panel guide-panel">
     <div className="guide-intro"><div className="guide-mark"><BookOpen size={25} /></div>
       <div><h2>Rà một đợt sale</h2><p>Rà Clip dùng bảng shop cung cấp làm dữ liệu đối chiếu.</p></div></div>
@@ -68,7 +69,8 @@ function Guide({ onOffers, onAdd }: { onOffers: () => void; onAdd: () => void })
         <p>Thêm file để đọc lời thoại và chữ trong hình, hoặc nhập phụ đề SRT / VTT. Với clip ghi “chỉ hôm nay”, điền ngày đăng để xác định thời hạn.</p>
         <button className="text-button" onClick={onAdd}>Thêm video <ArrowRight size={15} /></button></div></article>
       <article><span className="guide-icon"><ScanLine size={22} /></span><div><h3>Kiểm tra bằng chứng và xuất CSV</h3>
-        <p>Chọn một mốc rà, mở từng cảnh báo, kiểm tra đoạn gốc và đánh dấu phản hồi. Lưu phiên bản ưu đãi mới để tìm lại các clip theo SKU đã thay đổi.</p></div></article>
+        <p>App tự cập nhật kết quả khi lưu dữ liệu. Chọn video rồi bấm mốc thời gian để kiểm tra đoạn gốc. Mở Việc cần làm để theo dõi các cảnh báo.</p>
+        <button className="text-button" onClick={onReport}>Mở màn hình rà soát <ArrowRight size={15} /></button></div></article>
     </div>
     <div className="guide-privacy"><ShieldCheck size={20} /><div><strong>Dữ liệu lưu trên trình duyệt này</strong>
       <p>Video được xử lý tại chỗ. Lần đầu phân tích cần mạng để tải mô hình. Lời thoại và chữ nhận dạng có thể sai hoặc bỏ sót. Báo cáo dùng để ưu tiên kiểm tra thủ công.</p></div></div>
@@ -159,15 +161,25 @@ export function App() {
   function startAdd() { setEditing(undefined); setDialog('clip'); }
   function go(next: Page) {
     setPage(next); setFilter('all'); setFindingFocus('');
-    requestAnimationFrame(() => pageHeading.current?.focus());
+    requestAnimationFrame(() => {
+      pageHeading.current?.focus({ preventScroll: true });
+      pageHeading.current?.scrollIntoView({ block: 'start' });
+    });
+  }
+  function focusBoard(id: 'clip-evidence' | 'clip-list-heading') {
+    requestAnimationFrame(() => {
+      const target = document.getElementById(id);
+      target?.focus({ preventScroll: true });
+      target?.scrollIntoView({ block: 'start' });
+    });
+  }
+  function selectClip(id: string) {
+    setSelected(id); setFindingFocus('');
+    if (window.matchMedia('(max-width: 760px)').matches) focusBoard('clip-evidence');
   }
   function openFinding(clip: Clip, finding: Finding) {
     setPage('report'); setFilter('all'); setSelected(clip.id); setFindingFocus(finding.id);
-    requestAnimationFrame(() => {
-      const evidence = document.getElementById('clip-evidence');
-      evidence?.focus({ preventScroll: true });
-      evidence?.scrollIntoView({ block: 'nearest' });
-    });
+    focusBoard('clip-evidence');
   }
   function startEvidence(clip: Clip, index: number | null) {
     setEditing(clip); setEvidenceIndex(index); setDialog('evidence');
@@ -189,6 +201,8 @@ export function App() {
   const currentClip = availableClips.find(clip => clip.id === selected) ?? availableClips[0];
   const dateChanged = date !== data.checkedAt;
   const found = results.filter(row => leadVerdict(row.findings) === 'action').length;
+  const example = data.demo ? queueEntries(data).find(({ clip, finding }) =>
+    clip.demoMedia && finding.verdict === 'action' && finding.evidence) : undefined;
 
   async function launchCampaign(id: string) {
     await open(id);
@@ -459,7 +473,7 @@ export function App() {
       <header className="topbar"><div className="breadcrumb"><span>{data.demo ? 'Không gian mẫu' : campaign?.name ?? 'Không gian của shop'}</span><span>/</span><strong>{pages.find(item => item.id === page)?.label}</strong></div>
         <div className="top-actions">
           <button className="button secondary" onClick={exportReport} disabled={!data.audit || !data.clips.length || !!busy}><ArrowDownToLine size={17} /> Xuất báo cáo</button>
-          <button className="button primary" onClick={startAdd} disabled={!!busy}><Plus size={18} /> Thêm video</button>
+          <button className={`button ${page === 'report' ? 'secondary' : 'primary'}`} onClick={startAdd} disabled={!!busy}><Plus size={18} /> Thêm video</button>
         </div>
       </header>
       <div className="main-content">
@@ -467,15 +481,18 @@ export function App() {
           <div><h1 id="page-heading" ref={pageHeading} tabIndex={-1}>{title[page]}</h1><p>{descriptions[page]}</p></div>
           {page === 'report' && <span className="activity-pill"><span /> {data.audit ? `Đã rà ${results.length} video` : 'Chưa có lần rà'}</span>}
         </div>
-        {data.demo && page === 'report' && <div className="demo-banner">
-          <span className="demo-symbol"><SwitchCamera size={17} /></span>
-          <div><strong>Đang xem dữ liệu mẫu</strong><span> · Thử mở một video hoặc sửa bảng ưu đãi.</span></div>
-          <button className="text-button" onClick={() => openFromPage('shop')} disabled={!!busy}>Dùng dữ liệu của bạn <ArrowRight size={16} /></button>
-        </div>}
+        {page === 'report' && (data.demo
+          ? <DemoStart onExample={example ? () => openFinding(example.clip, example.finding) : undefined}
+            onShop={() => void open('shop').then(() => go('report')).catch(error => notify(errorText(error), true))}
+            onGuide={() => go('guide')} busy={!!busy} />
+          : <ShopStart version={version} clips={data.clips} hasReport={results.length > 0} busy={!!busy}
+            onOffers={() => go('offers')} onAdd={startAdd} onEdit={startEdit}
+            onScan={clip => { setEditing(clip); setDialog('batch'); }}
+            onResults={() => { setFilter('all'); focusBoard('clip-list-heading'); }} />)}
         {busy && !dialog && <div className="inline-status" role="status"><LoaderCircle size={17} className="spin" /> {busy}
           {cancel.current && <button className="text-button" onClick={() => cancel.current?.abort()}>Dừng</button>}
         </div>}
-        {page === 'report' && <>
+        {page === 'report' && (data.demo || data.clips.length > 0) && <>
           {todo > 0 && <div className="work-strip">
             <div><ClipboardList size={19} /><span><strong>{todo} việc đang mở</strong><small>Xác nhận cảnh báo và lưu tiến độ.</small></span></div>
             <button className="text-button" onClick={() => go('queue')}>Mở danh sách việc <ArrowRight size={16} /></button>
@@ -499,21 +516,21 @@ export function App() {
             <button className="button dark" disabled={!!busy || !data.clips.some(clip => clip.localMedia || clip.demoMedia)}
               onClick={() => setDialog('batch')}><ScanLine size={16} /> Quét hàng loạt</button></div>
         </section>}
-        {(page === 'report' || page === 'clips') && <div className="board">
+        {(page === 'report' || page === 'clips') && <div className={`board${currentClip ? '' : ' single-column'}`}>
           {page === 'report' && filter !== 'all' && <div className="filter-strip">Đang lọc: {verdictLabels[filter]}
             <button className="text-button" onClick={() => setFilter('all')}>Xóa bộ lọc <X size={14} /></button></div>}
           <ClipList key={page} clips={data.clips} results={resultIndex} filter={filter} selected={currentClip?.id ?? ''}
-            onSelect={id => { setSelected(id); setFindingFocus(''); }} onAdd={startAdd} library={page === 'clips'} ready={!!data.audit} />
-          <ClipDetail key={(currentClip?.id ?? 'empty') + findingFocus} clip={currentClip} result={currentClip && resultIndex.get(currentClip.id)}
+            onSelect={selectClip} onAdd={startAdd} library={page === 'clips'} ready={!!data.audit} />
+          {currentClip && <ClipDetail key={currentClip.id + '|' + findingFocus} clip={currentClip} result={resultIndex.get(currentClip.id)}
             focusedFinding={findingFocus} reviews={data.reviews} notes={data.notes} onReview={(id, value) => void review([id], value)}
             onEdit={startEdit} onDelete={startDelete} onEvidence={startEvidence}
-            onScan={clip => void rescan(clip)} busy={!!busy} />
+            onScan={clip => void rescan(clip)} onBack={() => focusBoard('clip-list-heading')} busy={!!busy} />}
         </div>}
         {page === 'queue' && <QueueView workspace={data} onOpen={openFinding} onReview={review} onNote={note} busy={!!busy} />}
         {page === 'history' && <HistoryView snapshots={data.snapshots ?? []} onReport={() => go('report')} />}
         {page === 'offers' && <OffersView versions={data.versions} clips={data.clips} onImport={() => importInput.current?.click()}
-          onEdit={() => setDialog('offers')} busy={!!busy} />}
-        {page === 'guide' && <Guide onOffers={() => go('offers')} onAdd={startAdd} />}
+          onEdit={() => setDialog('offers')} onNext={!data.demo && !data.clips.length ? () => { go('report'); startAdd(); } : undefined} busy={!!busy} />}
+        {page === 'guide' && <Guide onOffers={() => go('offers')} onAdd={startAdd} onReport={() => go('report')} />}
       </div>
     </main>
     <input ref={importInput} type="file" className="sr-only" tabIndex={-1} accept=".xlsx,.csv,.tsv"
@@ -525,7 +542,7 @@ export function App() {
     {dialog === 'clip' && <ClipDialog clip={editing} skus={[...new Set(version?.offers.map(row => row.sku) ?? [])]}
       onClose={clearDialog} onSave={saveClips} busy={busy} onCancel={() => cancel.current?.abort()} />}
     {dialog === 'catalog' && <CatalogDialog clips={data.clips} onApply={importCatalog} onClose={clearDialog} />}
-    {dialog === 'batch' && <BatchDialog clips={data.clips} onRun={scanBatch} onClose={clearDialog} />}
+    {dialog === 'batch' && <BatchDialog clips={data.clips} initialClipId={editing?.id} onRun={scanBatch} onClose={clearDialog} />}
     {dialog === 'campaigns' && <CampaignManager items={campaigns} active={active} onOpen={launchCampaign}
       onCreate={addCampaign} onRename={changeCampaign} onBackup={exportCampaign} onRestore={restoreCampaign} onClose={clearDialog} />}
     {dialog === 'evidence' && <EvidenceDialog row={evidenceIndex === null ? undefined : editing?.evidence[evidenceIndex]}

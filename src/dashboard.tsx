@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowDownToLine, ArrowUpRight, CalendarClock, ChevronRight, CirclePlay, FileVideo,
+  ArrowDownToLine, ArrowLeft, ArrowUpRight, CalendarClock, ChevronRight, CirclePlay, FileVideo,
   Captions, Film, Link2, ListChecks, Pencil, ScanLine, Search, Trash2,
 } from 'lucide-react';
 import { fold } from './claims';
@@ -39,6 +39,7 @@ export function ClipList({ clips, results, filter, selected, onSelect, onAdd, li
   const [query, setQuery] = useState('');
   const [format, setFormat] = useState<ClipFormat | 'all' | 'unset'>('all');
   const [readiness, setReadiness] = useState<'all' | 'sku' | 'evidence' | 'file'>('all');
+  const searchInput = useRef<HTMLInputElement>(null);
   const search = fold(query.trim());
   const entries = clips.filter(clip => {
     if (search && !fold(`${clip.title} ${clip.sku} ${clip.creator ?? ''} ${clip.format ? clipFormats[clip.format] : ''}`).includes(search)) return false;
@@ -49,7 +50,7 @@ export function ClipList({ clips, results, filter, selected, onSelect, onAdd, li
   });
   return <section className="panel list-panel">
     <div className="panel-heading">
-      <div><h2>{library ? 'Kho video' : 'Kết quả rà soát'}</h2>
+      <div><h2 id="clip-list-heading" tabIndex={-1}>{library ? 'Danh sách video' : 'Kết quả rà soát'}</h2>
         <p role="status" aria-atomic="true">{entries.length === clips.length ? `${clips.length} video` : `${entries.length} / ${clips.length} video`}</p>
       </div>
       <div className="list-tools">
@@ -62,7 +63,7 @@ export function ClipList({ clips, results, filter, selected, onSelect, onAdd, li
           <option value="all">Mọi trạng thái dữ liệu</option><option value="sku">Chưa gán SKU</option>
           <option value="evidence">Chưa có bằng chứng</option><option value="file">Chưa có file video</option>
         </select>}
-        <label className="search-box"><Search size={17} /><input aria-label="Tìm video" placeholder="Tìm video…" value={query}
+        <label className="search-box"><Search size={17} /><input ref={searchInput} aria-label="Tìm video" placeholder="Tìm video…" value={query}
           onChange={event => setQuery(event.target.value)} /></label>
       </div>
     </div>
@@ -83,7 +84,10 @@ export function ClipList({ clips, results, filter, selected, onSelect, onAdd, li
           <ChevronRight className="row-arrow" size={16} />
         </button>;
       })}</div>
-    </> : clips.length ? <Empty title="Không tìm thấy video" detail="Đổi từ khóa hoặc bộ lọc để xem kết quả khác." />
+    </> : clips.length ? <Empty title="Không tìm thấy video" detail="Đổi từ khóa hoặc bộ lọc để xem kết quả khác.">
+      {(query || format !== 'all' || readiness !== 'all') && <button className="button secondary" type="button"
+        onClick={() => { setQuery(''); setFormat('all'); setReadiness('all'); searchInput.current?.focus(); }}>Xóa tìm kiếm và bộ lọc</button>}
+    </Empty>
       : <Empty title="Kho video đang trống" detail="Thêm clip hoặc phụ đề để bắt đầu đối chiếu.">
         <button onClick={onAdd} className="button secondary">Thêm video</button>
       </Empty>}
@@ -171,10 +175,10 @@ function ClipPlayer({ clip, jump }: { clip: Clip; jump: { time: number; tick: nu
   </div>;
 }
 
-export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onReview, onEdit, onDelete, onEvidence, onScan, busy }: {
-  clip?: Clip; result?: ClipResult; focusedFinding: string; reviews: Record<string, Review>;
+export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onReview, onEdit, onDelete, onEvidence, onScan, onBack, busy }: {
+  clip: Clip; result?: ClipResult; focusedFinding: string; reviews: Record<string, Review>;
   notes?: Record<string, string>; onReview: (id: string, value: Review | '') => void;
-  onEdit: (clip: Clip) => void; onDelete: (clip: Clip) => void; onScan: (clip: Clip) => void; busy: boolean;
+  onEdit: (clip: Clip) => void; onDelete: (clip: Clip) => void; onScan: (clip: Clip) => void; onBack: () => void; busy: boolean;
   onEvidence: (clip: Clip, index: number | null) => void;
 }) {
   const [tab, setTab] = useState<'results' | 'segments'>('results');
@@ -183,10 +187,6 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
     const evidence = result?.findings.find(row => row.id === focusedFinding)?.evidence;
     return evidence ? { time: evidence.start, tick: 0 } : null;
   });
-  if (!clip) return <section className="panel detail-panel">
-    <div className="panel-heading"><div><h2>Bằng chứng</h2></div></div>
-    <Empty title="Chưa chọn video" detail="Chọn một video để xem từng đoạn phát hiện." />
-  </section>;
   const findings = [...(result?.findings ?? [])].sort((a, b) =>
     verdicts.indexOf(a.verdict) - verdicts.indexOf(b.verdict) || (a.evidence?.start ?? 0) - (b.evidence?.start ?? 0));
   const active = findings.find(row => row.id === findingId) ?? findings[0];
@@ -202,7 +202,10 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
     if (row.evidence) jumpTo(row.evidence.start);
   }
 
-  return <section className="panel detail-panel" id="clip-evidence" tabIndex={-1} aria-label="Bằng chứng video">
+  return <section className="panel detail-panel" id="clip-evidence" tabIndex={-1} aria-label={`Bằng chứng video ${clip.title}`}>
+    <button className="text-button back-to-clips" type="button" onClick={onBack}>
+      <ArrowLeft size={16} aria-hidden="true" /> Về danh sách video
+    </button>
     <div className="panel-heading detail-header">
       <div><h2>Bằng chứng</h2><p title={clip.title}>{clip.title}</p></div>
       <div className="mini-actions">
@@ -224,8 +227,9 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
         onJump={jumpTo} onEdit={index => onEvidence(clip, index)} /> : active ? <>
         <div className={`evidence-card ${active.verdict}`}>
           <div className="evidence-top"><Tag verdict={active.verdict} />
-            {active.evidence && <button className="time-button" onClick={() => select(active)} title="Đến mốc trong video" disabled={!playable}>
-              <CirclePlay size={15} /> {timestamp(active.evidence.start)}</button>}
+            {active.evidence && (playable
+              ? <button className="time-button" onClick={() => select(active)}><CirclePlay size={15} aria-hidden="true" /> Đến {timestamp(active.evidence.start)}</button>
+              : <span className="small-time">{timestamp(active.evidence.start)}</span>)}
           </div>
           {active.evidence && <blockquote>“{active.evidence.text}”</blockquote>}
           <p>{active.reason}</p>
@@ -245,7 +249,7 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
             aria-pressed={row.id === active.id} className={row.id === active.id ? 'active' : ''}
             onClick={() => select(row)}><FindingReason row={row} /></button>)}
         </div>}
-      </> : <div className="no-evidence"><FileVideo size={19} /> Chạy rà soát để đối chiếu bằng chứng với bảng ưu đãi.</div>}
+      </> : <div className="no-evidence"><FileVideo size={19} aria-hidden="true" /> Kết quả sẽ xuất hiện khi có bảng ưu đãi.</div>}
       {(clip.creator || clip.stats) && <div className="clip-stats"><strong>Số liệu đã nhập</strong>
         {[clip.creator, clip.stats?.views === undefined ? '' : numberLabel(clip.stats.views) + ' lượt xem',
           clip.stats?.orders === undefined ? '' : numberLabel(clip.stats.orders) + ' đơn'].filter(Boolean).join(' · ')}</div>}

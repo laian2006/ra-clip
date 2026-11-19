@@ -9,7 +9,7 @@ test('demo filters, seeks, remembers feedback and exports CSV', async ({ page })
   await expect(page.locator('.clip-row')).toHaveCount(9);
   await page.getByRole('button', { name: /Cần xử lý/ }).filter({ has: page.locator('.metric-bottom') }).click();
   await expect(page.locator('.clip-row')).toHaveCount(4);
-  await page.getByRole('button', { name: '00:05', exact: true }).click();
+  await page.getByRole('button', { name: 'Đến 00:05', exact: true }).click();
   await expect.poll(() => page.locator('video').evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThanOrEqual(4.8);
   await page.getByRole('combobox', { name: 'Phản hồi của shop' }).selectOption('new');
   await expect(page.getByRole('combobox', { name: 'Phản hồi của shop' })).toHaveValue('new');
@@ -27,15 +27,22 @@ test('real workspace imports Excel, takes notes, rechecks on offer change and pe
   await page.goto('/');
   await page.getByRole('button', { name: 'Dùng dữ liệu của bạn' }).click();
   await expect(page.getByText('Kho video đang trống')).toBeVisible();
-  await page.getByRole('navigation').getByRole('button', { name: 'Bảng ưu đãi' }).click();
+  await expect(page.locator('[aria-current="step"]')).toContainText('Thêm bảng ưu đãi');
+  await page.getByRole('button', { name: 'Mở bảng ưu đãi' }).click();
   await page.getByLabel('Nhập bảng ưu đãi', { exact: true }).setInputFiles('tests/fixtures/offers.xlsx');
   await expect(page.getByText('Đã lưu bảng v1.')).toBeVisible();
   await expect(page.getByText('129.000 đ', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Thêm video' }).click();
-  await page.getByLabel('Tên video').fill('Túi của shop');
-  await page.getByLabel('Mã phân loại (SKU)').fill('TUI-TEST');
-  await page.getByLabel('Phụ đề hoặc ghi chú').fill('00:12 Túi canvas giá 129 nghìn.');
-  await page.getByRole('button', { name: 'Thêm vào kho' }).click();
+  await page.getByRole('button', { name: 'Thêm video để rà' }).click();
+  const video = page.getByRole('dialog');
+  await video.getByLabel('Tên video').fill('Túi của shop');
+  await video.getByLabel('Phụ đề hoặc ghi chú').fill('00:12 Túi canvas giá 129 nghìn.');
+  await video.getByRole('button', { name: 'Thêm vào kho' }).click();
+  await page.getByRole('button', { name: 'Gán mã sản phẩm cho video' }).click();
+  await video.getByLabel('Mã phân loại (SKU)').fill('TUI-TEST');
+  await video.getByRole('button', { name: 'Lưu video' }).click();
+  await expect(page.getByRole('heading', { name: 'Báo cáo đã sẵn sàng' })).toBeVisible();
+  await page.getByRole('button', { name: 'Xem kết quả', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Kết quả rà soát' })).toBeFocused();
   await expect(page.locator('.evidence-card .tag')).toHaveText('Khớp bảng');
   await page.getByRole('navigation').getByRole('button', { name: 'Bảng ưu đãi' }).click();
   await page.getByRole('button', { name: 'Sửa bảng' }).click();
@@ -52,6 +59,28 @@ test('real workspace imports Excel, takes notes, rechecks on offer change and pe
   await page.getByRole('button', { name: 'Xóa video', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Xóa video', exact: true }).click();
   await expect(page.getByText('Kho video đang trống')).toBeVisible();
+});
+
+test('the mobile example opens the original evidence and returns to the video list', async ({ browser, baseURL }) => {
+  const page = await browser.newPage({ baseURL, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  try {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Xem một cảnh báo mẫu' }).tap();
+    const evidence = page.locator('#clip-evidence');
+    await expect(evidence).toBeFocused();
+    await expect(evidence.locator('blockquote')).toContainText('SALE99');
+    await expect(evidence.locator('.evidence-reference')).toContainText('Bảng ưu đãi');
+    await expect(evidence.getByRole('button', { name: 'Đến 00:05' })).toBeVisible();
+    const back = evidence.getByRole('button', { name: 'Về danh sách video' });
+    await expect(back).toBeInViewport({ ratio: 1 });
+    expect((await back.boundingBox())!.y).toBeGreaterThanOrEqual((await page.locator('.sidebar').boundingBox())!.height);
+    await back.tap();
+    await expect(page.getByRole('heading', { name: 'Kết quả rà soát' })).toBeFocused();
+    await page.getByRole('button', { name: /Review túi canvas/ }).tap();
+    await expect(evidence).toBeFocused();
+    await expect(evidence).toHaveAccessibleName(/Review túi canvas/);
+    await expect(back).toBeInViewport({ ratio: 1 });
+  } finally { await page.close(); }
 });
 
 test('mobile layout keeps controls visible without horizontal overflow', async ({ page }) => {

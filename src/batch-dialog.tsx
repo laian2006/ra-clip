@@ -10,13 +10,15 @@ import { Modal } from './ui';
 const labels = { ...scanLabels, running: 'Đang quét', stopped: 'Đã dừng' };
 const limit = 20;
 
-export function BatchDialog({ clips, onRun, onClose }: {
-  clips: Clip[];
+export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
+  clips: Clip[]; initialClipId?: string;
   onRun: (ids: string[], options: ScanOptions, signal: AbortSignal, onEvent: (event: BatchEvent) => void) => Promise<void>;
   onClose: () => void;
 }) {
   const videos = clips.filter(clip => clip.localMedia || clip.demoMedia);
-  const [selected, setSelected] = useState(() => new Set(videos.filter(clip => needsScan(clip)).slice(0, limit).map(clip => clip.id)));
+  const [selected, setSelected] = useState(() => new Set(initialClipId
+    ? videos.filter(clip => clip.id === initialClipId).map(clip => clip.id)
+    : videos.filter(clip => needsScan(clip)).slice(0, limit).map(clip => clip.id)));
   const [events, setEvents] = useState<Record<string, BatchEvent>>({});
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<'both' | 'audio' | 'frame'>('both');

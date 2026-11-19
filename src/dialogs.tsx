@@ -81,7 +81,7 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
     }
   }
 
-  return <Modal title={clip ? 'Sửa video' : 'Thêm video'} detail="Tải video hoặc nhập phụ đề có mốc thời gian." busy={!!busy} onClose={onClose}>
+  return <Modal title={clip ? 'Sửa video' : 'Thêm video'} detail="Chọn file video hoặc nhập phụ đề có mốc thời gian để đối chiếu." busy={!!busy} onClose={onClose}>
     <form className="dialog-form" onSubmit={submit}>
       <input ref={input} type="file" className="sr-only" tabIndex={-1}
         accept=".mp4,.webm,.mov,.m4v,video/mp4,video/webm,video/quicktime" multiple={!clip}
@@ -104,7 +104,8 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
       </div>}
       <div className="form-grid">
         {!many && <label>Tên video<input value={title} maxLength={140} onChange={event => setTitle(event.target.value)} placeholder="Ví dụ: Bình giữ nhiệt 500 ml" disabled={!!busy} /></label>}
-        <label>{many ? 'SKU mặc định' : 'Mã phân loại (SKU)'}<input value={sku} maxLength={100} onChange={event => setSku(event.target.value)} list="clip-skus" placeholder="BINH-500" disabled={!!busy} /></label>
+        <label>{many ? 'SKU mặc định' : 'Mã phân loại (SKU)'}<input value={sku} maxLength={100} onChange={event => setSku(event.target.value)} list="clip-skus"
+          aria-describedby="clip-sku-hint" placeholder="BINH-500" disabled={!!busy} /></label>
         <datalist id="clip-skus">{skus.map(value => <option key={value} value={value} />)}</datalist>
         {!many && <label>Link bài đăng<input type="url" value={link} onChange={event => setLink(event.target.value)} placeholder="https://…" disabled={!!busy} /></label>}
         <label>Ngày đăng<input type="date" value={published} onChange={event => setPublished(event.target.value)} disabled={!!busy} /></label>
@@ -113,6 +114,7 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
           {Object.entries(clipFormats).map(([key, name]) => <option value={key} key={key}>{name}</option>)}
         </select></label>
       </div>
+      <p className="hint-text" id="clip-sku-hint">Dùng đúng mã sản phẩm trên bảng ưu đãi để đối chiếu video.</p>
       {!many && <details className="clip-stats-editor" open={Boolean(creator || views || orders) || undefined}>
         <summary>Nhà sáng tạo và số liệu đã ghi nhận</summary>
         <div className="form-grid">

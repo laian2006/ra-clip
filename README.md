@@ -17,6 +17,8 @@ Mở địa chỉ Vite in ra, thường là `http://127.0.0.1:5173`. App mở v�
 
 ### Thử nhanh với video mẫu
 
+Từ màn hình đầu, chọn **Xem một cảnh báo mẫu** để tới đúng clip và mốc có ưu đãi hết hạn. Bấm **Đến 00:05** để tua đoạn gốc. Trên điện thoại, nút **Về danh sách video** đưa bạn trở lại danh sách.
+
 1. Mở **Kho video**, chọn **Cắt livestream**, rồi mở clip quạt mini. Đoạn **00:05** hiển thị giá 79k với mã đã hết hạn. Mức 199k ở đoạn sau là ngưỡng đơn để dùng mã.
 2. Trong **Bảng ưu đãi**, chọn **So sánh phiên bản** để thấy áo navy đổi từ 139.000đ lên 159.000đ và combo ly bỏ quà tặng.
 3. Mở **Việc cần làm**, lọc theo SKU, ghi chú và bấm tên video để về đúng phát hiện. Trong **Đoạn trích**, có thể xem, thêm, sửa và xóa từng đoạn lời thoại hoặc OCR.
@@ -25,6 +27,8 @@ Mở địa chỉ Vite in ra, thường là `http://127.0.0.1:5173`. App mở v�
 Danh sách 9 tình huống và mốc kiểm tra có trong [kho video mẫu](docs/video-mau.md).
 
 ## Dùng cho đợt sale thật
+
+Chọn **Dùng dữ liệu của bạn** và làm theo bước hiện trên màn hình **Rà soát**. App đề xuất nhập bảng, thêm video, gán mã sản phẩm hoặc phân tích clip theo dữ liệu đã có. Khi lưu bảng và video, kết quả đối chiếu tự cập nhật.
 
 - **Chiến dịch:** mở **Quản lý chiến dịch** để tạo hoặc đổi tên từng đợt sale. Mỗi chiến dịch có kho video, bảng ưu đãi, phản hồi và nhật ký riêng. Chọn **Dùng dữ liệu của bạn** để vào không gian mặc định. Dữ liệu đã lưu bằng phiên bản 1.0 vẫn mở trong không gian này.
 - **Bảng ưu đãi:** nhập trang đầu của XLSX hoặc file CSV/TSV có các cột `sku, name, voucher, price, gift, start, end, condition`. Dùng mẫu CSV trong app. Mỗi cặp SKU và voucher là một dòng. Dòng không có mã đại diện cho giá hoặc ưu đãi thông thường. Giá tính bằng VNĐ, thời hạn dùng giờ Việt Nam (UTC+7).

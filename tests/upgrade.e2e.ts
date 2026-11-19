@@ -87,7 +87,7 @@ test('user subtitles load as an actual WebVTT track', async ({ page }) => {
   })).toBe('Lời thoại người dùng nhập.');
 });
 
-test('axe checks core pages and both new dialogs', async ({ page }) => {
+test('axe checks core pages, first-use setup, and import and scan dialogs', async ({ page }) => {
   test.setTimeout(70_000);
   await page.goto('/');
   await page.getByRole('heading', { name: 'Rà soát video sau sale' }).waitFor();
@@ -110,4 +110,9 @@ test('axe checks core pages and both new dialogs', async ({ page }) => {
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Quét hàng loạt' }).click();
   await assertAxe('Quét hàng loạt');
+  await page.keyboard.press('Escape');
+  await navigate('Rà soát');
+  await page.getByRole('button', { name: 'Dùng dữ liệu của bạn' }).click();
+  await page.getByRole('heading', { name: 'Bắt đầu rà video của bạn' }).waitFor();
+  await assertAxe('Bắt đầu rà video của bạn');
 });
