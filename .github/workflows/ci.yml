@@ -1,8 +1,13 @@
-name: Kiểm thử
+name: Kiểm thử và triển khai
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -23,3 +28,23 @@ jobs:
       - run: npm run test:e2e
         env:
           RA_CLIP_BROWSER: chrome
+      - uses: actions/upload-pages-artifact@v4
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        with:
+          path: dist
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Đưa bản build lên GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

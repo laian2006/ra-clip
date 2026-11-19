@@ -4,6 +4,12 @@ Rà lại video bán hàng sau khi giá, voucher hoặc quà tặng thay đổi.
 
 ![Màn hình rà soát với dữ liệu mẫu](docs/giao-dien.png)
 
+## Chạy trên web
+
+Mở [Rà Clip trên GitHub Pages](https://laian2006.github.io/ra-clip/) để thử với dữ liệu mẫu hoặc dữ liệu của bạn. Sau khi cập nhật `main`, GitHub Actions kiểm thử và đưa bản build đạt kiểm thử lên web.
+
+Dữ liệu lưu trong trình duyệt theo địa chỉ web. Nếu chuyển từ bản trên máy sang bản web, tải file `.raclip` trong mục **Quản lý chiến dịch** trên bản cũ rồi chọn **Mở bản sao lưu** trên bản web.
+
 ## Chạy trên máy
 
 Cần Node.js 22.12+ (dòng 22) hoặc 24+ và trình duyệt hiện đại.
