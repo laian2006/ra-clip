@@ -15,8 +15,8 @@ const filters: { value: QueueFilter; label: string }[] = [
   { value: 'wrong', label: 'Báo nhầm' }, { value: 'all', label: 'Tất cả' },
 ];
 
-export function QueueView({ workspace, busy, onReview, onNote, onOpen }: {
-  workspace: Workspace; busy: boolean;
+export function QueueView({ workspace, busy, exportBlocked, onReview, onNote, onOpen }: {
+  workspace: Workspace; busy: boolean; exportBlocked: boolean;
   onReview: (ids: string[], value: Review | '') => Promise<boolean>;
   onNote: (id: string, note: string) => Promise<void>;
   onOpen: (clip: Clip, finding: Finding) => void;
@@ -85,7 +85,7 @@ export function QueueView({ workspace, busy, onReview, onNote, onOpen }: {
   }
 
   function exportRows() {
-    if (!workspace.audit) return;
+    if (!workspace.audit || exportBlocked) return;
     const ids = new Set(rows.map(row => row.finding.id));
     const audit = { ...workspace.audit, results: workspace.audit.results.map(result => ({
       ...result, findings: result.findings.filter(finding => ids.has(finding.id)),
@@ -95,7 +95,8 @@ export function QueueView({ workspace, busy, onReview, onNote, onOpen }: {
 
   return <section className="panel queue-panel">
     <div className="panel-heading ops-heading"><div><h2>Danh sách việc</h2><p>{entries.filter(row => reviewOpen(row.review)).length} việc đang mở</p></div>
-      <button className="button secondary" type="button" disabled={!rows.length} onClick={exportRows}><ArrowDownToLine size={16} /> Xuất danh sách</button>
+      <button className="button secondary" type="button" disabled={!rows.length || exportBlocked} onClick={exportRows}
+        aria-describedby={exportBlocked ? 'pending-audit' : undefined}><ArrowDownToLine size={16} /> Xuất danh sách</button>
     </div>
     <div className="ops-toolbar">
       <div className="segmented" ref={filtersRef} role="group" aria-label="Lọc theo tiến độ">

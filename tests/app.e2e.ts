@@ -35,7 +35,12 @@ test('real workspace imports Excel, takes notes, rechecks on offer change and pe
   await page.getByRole('button', { name: 'Thêm video để rà' }).click();
   const video = page.getByRole('dialog');
   await video.getByLabel('Tên video').fill('Túi của shop');
-  await video.getByLabel('Phụ đề hoặc ghi chú').fill('00:12 Túi canvas giá 129 nghìn.');
+  const subtitles = video.getByLabel('Phụ đề hoặc ghi chú');
+  await subtitles.fill('00:01 Túi canvas.\nGiá 129 nghìn.');
+  await video.getByRole('button', { name: 'Thêm vào kho' }).click();
+  await expect(video.getByRole('alert')).toContainText('Dòng 2: Thiếu mốc thời gian');
+  await expect(subtitles).toBeFocused();
+  await subtitles.fill('00:01 Túi canvas.\n00:12 Giá 129 nghìn.');
   await video.getByRole('button', { name: 'Thêm vào kho' }).click();
   await page.getByRole('button', { name: 'Gán mã sản phẩm cho video' }).click();
   await video.getByLabel('Mã phân loại (SKU)').fill('TUI-TEST');
@@ -94,4 +99,54 @@ test('mobile layout keeps controls visible without horizontal overflow', async (
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
   }
+});
+
+test('results always show evidence for a visible video, even after searching', async ({ page }) => {
+  await page.setViewportSize({ width: 773, height: 766 });
+  await page.goto('/');
+  const search = page.getByRole('textbox', { name: 'Tìm video' });
+  const evidence = page.locator('#clip-evidence');
+  await search.fill('tui canvas');
+  await expect(page.locator('.clip-row')).toHaveCount(1);
+  await expect(evidence).toHaveAccessibleName(/Review túi canvas/);
+  await expect(search).toBeFocused();
+  await search.fill('không có video này');
+  await expect(evidence).toHaveCount(0);
+  await page.getByRole('button', { name: 'Xem một cảnh báo mẫu' }).click();
+  await expect(search).toHaveValue('');
+  await expect(evidence.locator('blockquote')).toContainText('SALE99');
+  const rows = page.locator('.row-title strong');
+  expect(await rows.evaluateAll(items => items.every(item => item.scrollWidth <= item.clientWidth))).toBe(true);
+});
+
+test('export waits for a pending audit date on both the report and work queue', async ({ page }) => {
+  await page.goto('/');
+  const date = page.getByLabel('Thời điểm rà (UTC+7)');
+  const exportReport = page.getByRole('button', { name: 'Xuất báo cáo' });
+  await date.fill('2026-11-10T09:00');
+  await expect(exportReport).toBeDisabled();
+  await page.getByRole('navigation').getByRole('button', { name: 'Việc cần làm' }).click();
+  await expect(page.getByRole('button', { name: 'Xuất danh sách' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Về Rà soát' }).click();
+  await page.getByRole('button', { name: 'Rà soát ngay' }).click();
+  await expect(exportReport).toBeEnabled();
+  const download = page.waitForEvent('download');
+  await exportReport.click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe('ra-clip-2026-11-10.csv');
+  expect(await readFile((await file.path())!, 'utf8')).toContain('2026-11-10T09:00');
+});
+
+test('manual offer errors point to the row visible in the form', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Dùng dữ liệu của bạn' }).click();
+  await page.getByRole('button', { name: 'Mở bảng ưu đãi' }).click();
+  await page.getByRole('button', { name: 'Tạo bảng', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Lưu phiên bản' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Dòng 1: Thiếu mã phân loại (SKU).');
+  await dialog.getByRole('textbox', { name: 'SKU', exact: true }).fill('TEST-QA');
+  await dialog.getByRole('textbox', { name: 'Giá (đ)' }).fill('abc');
+  await dialog.getByRole('button', { name: 'Lưu phiên bản' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Dòng 1: Giá không hợp lệ');
 });

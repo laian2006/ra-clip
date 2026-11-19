@@ -3,7 +3,7 @@ import { displayDate, kindLabels, money, normalizeCode, offerKey } from './domai
 import type { Audit, Claim, Clip, Finding, Offer, OfferVersion, Verdict } from './domain';
 import { parseVietnamTime } from './time';
 
-export function validateOffers(input: Offer[]): Offer[] {
+export function validateOffers(input: Offer[], sourceLines?: number[]): Offer[] {
   if (!input.length) throw Error('Bảng ưu đãi cần ít nhất một dòng.');
   const keys = new Set<string>();
   return input.map((item, index) => {
@@ -12,7 +12,7 @@ export function validateOffers(input: Offer[]): Offer[] {
       price: item.price, gift: item.gift.trim(), start: item.start.trim(),
       end: item.end.trim(), condition: item.condition.trim(),
     };
-    const fail = (message: string): never => { throw Error(`Dòng ${index + 2}: ${message}`); };
+    const fail = (message: string): never => { throw Error(`Dòng ${sourceLines?.[index] ?? index + 1}: ${message}`); };
     if (!offer.sku) fail('Thiếu mã phân loại (SKU).');
     if (offer.code && !/^[A-Z0-9][A-Z0-9_-]{1,39}$/.test(offer.code)) fail('Mã voucher không hợp lệ.');
     if (offer.price !== null && (!Number.isSafeInteger(offer.price) || offer.price < 0)) fail('Giá phải là số nguyên VNĐ.');

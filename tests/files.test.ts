@@ -16,6 +16,8 @@ describe('Import and export', () => {
     expect(() => readPrice('99k 12')).toThrow();
     expect(() => readDelimited('sku,name\nA,"vẫn mở')).toThrow();
     expect(() => rowsToOffers([['price'], ['200']])).toThrow('Thiếu cột sku');
+    expect(() => rowsToOffers([['sku', 'price'], ['A', '150000'], [], ['', '99000']]))
+      .toThrow('Dòng 4: Thiếu mã phân loại (SKU).');
   });
 
   it('extracts and sorts SRT and VTT cues and manual notes', () => {
@@ -24,6 +26,13 @@ describe('Import and export', () => {
     expect(readSubtitles('WEBVTT\n\n00:08.125 --> 00:09.000 align:start\nCòn 99k')[0].start).toBe(8.125);
     expect(readSubtitles('00:18 Còn 99k\n00:02 Không khuyến mãi', 'manual')[0].start).toBe(2);
     expect(() => readSubtitles('00:99 Không hợp lệ')).toThrow('Thiếu mốc');
+  });
+
+  it('reports malformed manual lines and invalid subtitle cues instead of saving partial evidence', () => {
+    expect(() => readSubtitles('00:01 Bình giữ nhiệt.\nGiá 99 nghìn.', 'manual')).toThrow('Dòng 2: Thiếu mốc');
+    expect(() => readSubtitles('1\n00:00:05,000 --> 00:00:07,000\nCòn 99k\n\n2\n00:00:12,000 --> 00:00:09,000\nMã SALE99'))
+      .toThrow('Khối phụ đề 2');
+    expect(readSubtitles('WEBVTT\n\nNOTE Chú thích\n\n00:08.125 --> 00:09.000\nCòn 99k')).toHaveLength(1);
   });
 
   it('writes review decisions and a CSV that escapes spreadsheet formulas', () => {

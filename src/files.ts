@@ -89,13 +89,15 @@ export function rowsToOffers(rows: unknown[][]) {
     index.set(name, i);
   });
   if (!index.has('sku')) throw Error('Thiếu cột sku. Hãy dùng mẫu để giữ đúng tiêu đề cột.');
-  return validateOffers(body.flatMap((row, i) => {
+  const sourceLines: number[] = [];
+  const offers = body.flatMap((row, i) => {
     if (!row.some(value => sheetText(value).trim())) return [];
     const get = (name: string) => {
       const column = index.get(name);
       return column === undefined ? '' : sheetText(row[column]).trim();
     };
     try {
+      sourceLines.push(i + 2);
       return [{
         sku: get('sku'), name: get('name'), code: get('voucher'), price: readPrice(get('price')),
         gift: get('gift'), start: dateInput(get('start')), end: dateInput(get('end'), true),
@@ -104,7 +106,8 @@ export function rowsToOffers(rows: unknown[][]) {
     } catch (error) {
       throw Error(`Dòng ${i + 2}: ${error instanceof Error ? error.message : String(error)}`);
     }
-  }));
+  });
+  return validateOffers(offers, sourceLines);
 }
 
 export async function readTableFile(file: File) {
@@ -135,25 +138,34 @@ function cueTime(label: string): number | null {
 }
 
 export function readSubtitles(input: string, source: Evidence['source'] = 'subtitle'): Evidence[] {
-  const cleaned = input.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').trim();
-  if (!cleaned) throw Error('Phụ đề đang trống.');
+  const cleaned = input.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+  if (!cleaned.trim()) throw Error('Phụ đề đang trống.');
   const evidence: Evidence[] = [];
   const range = /^((?:\d+:)?\d{1,2}:\d{2}(?:[.,]\d{1,3})?)\s*-->\s*((?:\d+:)?\d{1,2}:\d{2}(?:[.,]\d{1,3})?)(?:\s.*)?$/;
-  for (const block of cleaned.split(/\n\s*\n/)) {
-    const lines = block.split('\n').map(line => line.trim());
-    const i = lines.findIndex(line => range.test(line));
-    if (i === -1) continue;
-    const [, inTime, outTime] = lines[i].match(range)!;
-    const start = cueTime(inTime);
-    const end = cueTime(outTime);
-    const text = lines.slice(i + 1).join(' ').replace(/<[^>]+>/g, '').trim();
-    if (start !== null && end !== null && end >= start && text) evidence.push({ start, end, text, source });
-  }
-  if (!evidence.length && !cleaned.includes('-->')) {
-    for (const line of cleaned.split('\n')) {
+  const vtt = /^WEBVTT(?:\s|$)/.test(cleaned.trimStart());
+  if (vtt || cleaned.includes('-->')) {
+    for (const [index, block] of cleaned.trim().split(/\n\s*\n/).entries()) {
+      const lines = block.split('\n').map(line => line.trim());
+      if (vtt && ((index === 0 && /^WEBVTT(?:\s|$)/.test(lines[0])) || /^(?:NOTE|STYLE|REGION)(?:\s|$)/.test(lines[0]))
+        && !lines.some(line => range.test(line))) continue;
+      const i = lines.findIndex(line => range.test(line));
+      const match = i < 0 ? null : lines[i].match(range);
+      const start = match ? cueTime(match[1]) : null;
+      const end = match ? cueTime(match[2]) : null;
+      const body = lines.slice(i + 1);
+      const text = body.join(' ').replace(/<[^>]+>/g, '').trim();
+      if (i > 1 || start === null || end === null || end < start || !text || body.some(line => range.test(line))) {
+        throw Error(`Khối phụ đề ${index + 1}: kiểm tra mốc bắt đầu, mốc kết thúc và nội dung. Ngăn cách các đoạn bằng dòng trống.`);
+      }
+      evidence.push({ start, end, text, source });
+    }
+  } else {
+    for (const [index, line] of cleaned.split('\n').entries()) {
+      if (!line.trim()) continue;
       const match = line.trim().match(/^\[?((?:\d+:)?\d{1,2}:\d{2}(?:[.,]\d{1,3})?)\]?\s+[-–—]?\s*(\S.*)$/);
       const start = match ? cueTime(match[1]) : null;
-      if (match && start !== null) evidence.push({ start, end: null, text: match[2], source });
+      if (!match || start === null) throw Error(`Dòng ${index + 1}: Thiếu mốc thời gian hợp lệ. Ví dụ “00:05 Nội dung lời thoại”.`);
+      evidence.push({ start, end: null, text: match[2], source });
     }
   }
   if (!evidence.length) throw Error('Thiếu mốc thời gian. Dùng SRT, VTT hoặc mẫu “00:05 Nội dung lời thoại”.');

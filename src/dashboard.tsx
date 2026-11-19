@@ -32,39 +32,46 @@ export function Metrics({ results, filter, onFilter }: {
   </div>;
 }
 
-export function ClipList({ clips, results, filter, selected, onSelect, onAdd, library, ready }: {
-  clips: Clip[]; results: Map<string, ClipResult>; filter: Verdict | 'all'; selected: string;
+export type ClipFilters = { query: string; format: ClipFormat | 'all' | 'unset'; readiness: 'all' | 'sku' | 'evidence' | 'file' };
+export const allClipFilters: ClipFilters = { query: '', format: 'all', readiness: 'all' };
+
+export function visibleClips(clips: Clip[], results: Map<string, ClipResult>, verdict: Verdict | 'all', filters: ClipFilters) {
+  const { query, format, readiness } = filters;
+  const search = fold(query.trim());
+  return clips.filter(clip => {
+    if (search && !fold(`${clip.title} ${clip.sku} ${clip.creator ?? ''} ${clip.format ? clipFormats[clip.format] : ''}`).includes(search)) return false;
+    if ((readiness === 'sku' && clip.sku) || (readiness === 'evidence' && clip.evidence.length)
+      || (readiness === 'file' && (clip.localMedia || clip.demoMedia))) return false;
+    if (format !== 'all' && (clip.format ?? 'unset') !== format) return false;
+    return verdict === 'all' || leadVerdict(results.get(clip.id)?.findings ?? []) === verdict;
+  });
+}
+
+export function ClipList({ entries, total, results, filters, onFilter, selected, onSelect, onAdd, library, ready }: {
+  entries: Clip[]; total: number; results: Map<string, ClipResult>; filters: ClipFilters; onFilter: (value: ClipFilters) => void; selected: string;
   onSelect: (id: string) => void; onAdd: () => void; library?: boolean; ready: boolean;
 }) {
-  const [query, setQuery] = useState('');
-  const [format, setFormat] = useState<ClipFormat | 'all' | 'unset'>('all');
-  const [readiness, setReadiness] = useState<'all' | 'sku' | 'evidence' | 'file'>('all');
+  const { query, format, readiness } = filters;
   const searchInput = useRef<HTMLInputElement>(null);
-  const search = fold(query.trim());
-  const entries = clips.filter(clip => {
-    if (search && !fold(`${clip.title} ${clip.sku} ${clip.creator ?? ''} ${clip.format ? clipFormats[clip.format] : ''}`).includes(search)) return false;
-    if (library && ((readiness === 'sku' && clip.sku) || (readiness === 'evidence' && clip.evidence.length)
-      || (readiness === 'file' && (clip.localMedia || clip.demoMedia)))) return false;
-    if (library && format !== 'all' && (clip.format ?? 'unset') !== format) return false;
-    return library || filter === 'all' || leadVerdict(results.get(clip.id)?.findings ?? []) === filter;
-  });
   return <section className="panel list-panel">
     <div className="panel-heading">
       <div><h2 id="clip-list-heading" tabIndex={-1}>{library ? 'Danh sách video' : 'Kết quả rà soát'}</h2>
-        <p role="status" aria-atomic="true">{entries.length === clips.length ? `${clips.length} video` : `${entries.length} / ${clips.length} video`}</p>
+        <p role="status" aria-atomic="true">{entries.length === total ? `${total} video` : `${entries.length} / ${total} video`}</p>
       </div>
       <div className="list-tools">
-        {library && <select aria-label="Lọc kiểu video" value={format} onChange={event => setFormat(event.target.value as typeof format)}>
+        {library && <select aria-label="Lọc kiểu video" value={format}
+          onChange={event => onFilter({ ...filters, format: event.target.value as ClipFilters['format'] })}>
           <option value="all">Mọi kiểu video</option>
           {Object.entries(clipFormats).map(([key, value]) => <option value={key} key={key}>{value}</option>)}
           <option value="unset">Chưa chọn kiểu</option>
         </select>}
-        {library && <select aria-label="Lọc theo dữ liệu chuẩn bị" value={readiness} onChange={event => setReadiness(event.target.value as typeof readiness)}>
+        {library && <select aria-label="Lọc theo dữ liệu chuẩn bị" value={readiness}
+          onChange={event => onFilter({ ...filters, readiness: event.target.value as ClipFilters['readiness'] })}>
           <option value="all">Mọi trạng thái dữ liệu</option><option value="sku">Chưa gán SKU</option>
           <option value="evidence">Chưa có bằng chứng</option><option value="file">Chưa có file video</option>
         </select>}
         <label className="search-box"><Search size={17} /><input ref={searchInput} aria-label="Tìm video" placeholder="Tìm video…" value={query}
-          onChange={event => setQuery(event.target.value)} /></label>
+          onChange={event => onFilter({ ...filters, query: event.target.value })} /></label>
       </div>
     </div>
     {entries.length ? <>
@@ -84,9 +91,9 @@ export function ClipList({ clips, results, filter, selected, onSelect, onAdd, li
           <ChevronRight className="row-arrow" size={16} />
         </button>;
       })}</div>
-    </> : clips.length ? <Empty title="Không tìm thấy video" detail="Đổi từ khóa hoặc bộ lọc để xem kết quả khác.">
+    </> : total ? <Empty title="Không tìm thấy video" detail="Đổi từ khóa hoặc bộ lọc để xem kết quả khác.">
       {(query || format !== 'all' || readiness !== 'all') && <button className="button secondary" type="button"
-        onClick={() => { setQuery(''); setFormat('all'); setReadiness('all'); searchInput.current?.focus(); }}>Xóa tìm kiếm và bộ lọc</button>}
+        onClick={() => { onFilter(allClipFilters); searchInput.current?.focus(); }}>Xóa tìm kiếm và bộ lọc</button>}
     </Empty>
       : <Empty title="Kho video đang trống" detail="Thêm clip hoặc phụ đề để bắt đầu đối chiếu.">
         <button onClick={onAdd} className="button secondary">Thêm video</button>

@@ -4,7 +4,7 @@ import {
   CircleHelp, Clapperboard, ClipboardList, FileSpreadsheet, Film, FolderOpen, Github, History, LayoutDashboard, LoaderCircle,
   Plus, ScanLine, ShieldCheck, Upload, X,
 } from 'lucide-react';
-import { ClipDetail, ClipList, Metrics } from './dashboard';
+import { allClipFilters, ClipDetail, ClipList, Metrics, visibleClips } from './dashboard';
 import { CampaignManager } from './campaigns';
 import { EvidenceDialog } from './evidence';
 import { HistoryView } from './history';
@@ -83,6 +83,7 @@ export function App() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [page, setPage] = useState<Page>('report');
   const [filter, setFilter] = useState<Verdict | 'all'>('all');
+  const [clipFilters, setClipFilters] = useState(allClipFilters);
   const [selected, setSelected] = useState('');
   const [date, setDate] = useState('');
   const [dialog, setDialog] = useState<'clip' | 'offers' | 'delete' | 'campaigns' | 'evidence' | 'catalog' | 'batch' | null>(null);
@@ -113,6 +114,7 @@ export function App() {
       setDate(data.checkedAt);
       setPage('report');
       setFilter('all');
+      setClipFilters(allClipFilters);
       setSelected(data.clips[0]?.id ?? '');
       setFindingFocus('');
       setNotice(null);
@@ -160,7 +162,7 @@ export function App() {
   function notify(text: string, error = false) { setNotice({ text, error }); }
   function startAdd() { setEditing(undefined); setDialog('clip'); }
   function go(next: Page) {
-    setPage(next); setFilter('all'); setFindingFocus('');
+    setPage(next); setFilter('all'); setClipFilters(allClipFilters); setFindingFocus('');
     requestAnimationFrame(() => {
       pageHeading.current?.focus({ preventScroll: true });
       pageHeading.current?.scrollIntoView({ block: 'start' });
@@ -175,10 +177,10 @@ export function App() {
   }
   function selectClip(id: string) {
     setSelected(id); setFindingFocus('');
-    if (window.matchMedia('(max-width: 760px)').matches) focusBoard('clip-evidence');
+    if (window.matchMedia('(max-width: 900px)').matches) focusBoard('clip-evidence');
   }
   function openFinding(clip: Clip, finding: Finding) {
-    setPage('report'); setFilter('all'); setSelected(clip.id); setFindingFocus(finding.id);
+    setPage('report'); setFilter('all'); setClipFilters(allClipFilters); setSelected(clip.id); setFindingFocus(finding.id);
     focusBoard('clip-evidence');
   }
   function startEvidence(clip: Clip, index: number | null) {
@@ -195,9 +197,7 @@ export function App() {
   const version = data.versions.at(-1);
   const results = data.audit?.results ?? [];
   const resultIndex = new Map(results.map(row => [row.clipId, row]));
-  const availableClips = page === 'report' && filter !== 'all'
-    ? data.clips.filter(clip => leadVerdict(resultIndex.get(clip.id)?.findings ?? []) === filter)
-    : data.clips;
+  const availableClips = visibleClips(data.clips, resultIndex, page === 'report' ? filter : 'all', clipFilters);
   const currentClip = availableClips.find(clip => clip.id === selected) ?? availableClips[0];
   const dateChanged = date !== data.checkedAt;
   const found = results.filter(row => leadVerdict(row.findings) === 'action').length;
@@ -349,6 +349,7 @@ export function App() {
       await persist(updatedReport({ ...data, clips }, 'clips'), media);
       setSelected(rows[0].id);
       setFilter('all');
+      if (!editing) setClipFilters(allClipFilters);
       if (page !== 'report') setPage('clips');
       clearDialog();
       notify(`Đã lưu ${rows.length} video.${warnings.length ? ' ' + warnings.slice(0, 2).join(' · ') : ''}`, warnings.length > 0);
@@ -431,7 +432,7 @@ export function App() {
   }
 
   function exportReport() {
-    if (data.audit) {
+    if (data.audit && !dateChanged) {
       download(auditCsv(data.audit, data.clips, data.reviews, data.notes), `ra-clip-${data.audit.checkedAt.slice(0, 10)}.csv`);
       notify('Đã tạo file báo cáo CSV.');
     }
@@ -472,7 +473,8 @@ export function App() {
     <main className="main" id="main-content" tabIndex={-1}>
       <header className="topbar"><div className="breadcrumb"><span>{data.demo ? 'Không gian mẫu' : campaign?.name ?? 'Không gian của shop'}</span><span>/</span><strong>{pages.find(item => item.id === page)?.label}</strong></div>
         <div className="top-actions">
-          <button className="button secondary" onClick={exportReport} disabled={!data.audit || !data.clips.length || !!busy}><ArrowDownToLine size={17} /> Xuất báo cáo</button>
+          <button className="button secondary" onClick={exportReport} disabled={!data.audit || !data.clips.length || dateChanged || !!busy}
+            aria-describedby={dateChanged ? 'pending-audit' : undefined}><ArrowDownToLine size={17} /> Xuất báo cáo</button>
           <button className={`button ${page === 'report' ? 'secondary' : 'primary'}`} onClick={startAdd} disabled={!!busy}><Plus size={18} /> Thêm video</button>
         </div>
       </header>
@@ -488,7 +490,7 @@ export function App() {
           : <ShopStart version={version} clips={data.clips} hasReport={results.length > 0} busy={!!busy}
             onOffers={() => go('offers')} onAdd={startAdd} onEdit={startEdit}
             onScan={clip => { setEditing(clip); setDialog('batch'); }}
-            onResults={() => { setFilter('all'); focusBoard('clip-list-heading'); }} />)}
+            onResults={() => { setFilter('all'); setClipFilters(allClipFilters); focusBoard('clip-list-heading'); }} />)}
         {busy && !dialog && <div className="inline-status" role="status"><LoaderCircle size={17} className="spin" /> {busy}
           {cancel.current && <button className="text-button" onClick={() => cancel.current?.abort()}>Dừng</button>}
         </div>}
@@ -506,9 +508,15 @@ export function App() {
               <button type="submit" className="button dark" disabled={!!busy}><ScanLine size={17} /> Rà soát ngay</button>
             </form>
           </section>
-          {dateChanged && <p className="date-changed">Vừa đổi thời điểm. Chọn Rà soát ngay để cập nhật báo cáo {data.audit ? `ngày ${displayDate(data.audit.checkedAt)}` : ''}.</p>}
-          <Metrics results={results} filter={filter} onFilter={setFilter} />
         </>}
+        {dateChanged && <div className="date-changed">
+          <p id="pending-audit" role="status">Thời điểm mới chưa được áp dụng.
+            {data.audit && ` Kết quả hiện tại dùng ngày ${displayDate(data.audit.checkedAt)}.`}
+            {page === 'report' && ' Chọn Rà soát ngay để cập nhật trước khi xuất.'}</p>
+          {page !== 'report' && <button className="text-button" type="button" onClick={() => go('report')}>Về Rà soát</button>}
+          <button className="text-button" type="button" onClick={() => setDate(data.checkedAt)}>Dùng thời điểm cũ</button>
+        </div>}
+        {page === 'report' && (data.demo || data.clips.length > 0) && <Metrics results={results} filter={filter} onFilter={setFilter} />}
         {page === 'clips' && <section className="library-work" aria-label="Nhập và quét kho video">
           <div><strong>{data.clips.length} video</strong><span>{data.clips.filter(clip => !clip.sku).length} chưa gán SKU</span>
             <span>{data.clips.filter(clip => !clip.evidence.length).length} chưa có bằng chứng</span></div>
@@ -519,14 +527,15 @@ export function App() {
         {(page === 'report' || page === 'clips') && <div className={`board${currentClip ? '' : ' single-column'}`}>
           {page === 'report' && filter !== 'all' && <div className="filter-strip">Đang lọc: {verdictLabels[filter]}
             <button className="text-button" onClick={() => setFilter('all')}>Xóa bộ lọc <X size={14} /></button></div>}
-          <ClipList key={page} clips={data.clips} results={resultIndex} filter={filter} selected={currentClip?.id ?? ''}
+          <ClipList key={page} entries={availableClips} total={data.clips.length} results={resultIndex} filters={clipFilters}
+            onFilter={setClipFilters} selected={currentClip?.id ?? ''}
             onSelect={selectClip} onAdd={startAdd} library={page === 'clips'} ready={!!data.audit} />
           {currentClip && <ClipDetail key={currentClip.id + '|' + findingFocus} clip={currentClip} result={resultIndex.get(currentClip.id)}
             focusedFinding={findingFocus} reviews={data.reviews} notes={data.notes} onReview={(id, value) => void review([id], value)}
             onEdit={startEdit} onDelete={startDelete} onEvidence={startEvidence}
             onScan={clip => void rescan(clip)} onBack={() => focusBoard('clip-list-heading')} busy={!!busy} />}
         </div>}
-        {page === 'queue' && <QueueView workspace={data} onOpen={openFinding} onReview={review} onNote={note} busy={!!busy} />}
+        {page === 'queue' && <QueueView workspace={data} onOpen={openFinding} onReview={review} onNote={note} busy={!!busy} exportBlocked={dateChanged} />}
         {page === 'history' && <HistoryView snapshots={data.snapshots ?? []} onReport={() => go('report')} />}
         {page === 'offers' && <OffersView versions={data.versions} clips={data.clips} onImport={() => importInput.current?.click()}
           onEdit={() => setDialog('offers')} onNext={!data.demo && !data.clips.length ? () => { go('report'); startAdd(); } : undefined} busy={!!busy} />}

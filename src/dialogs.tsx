@@ -33,10 +33,12 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
   const [fileSkus, setFileSkus] = useState<string[]>([]);
   const [subtitles, setSubtitles] = useState('');
   const [subtitleFile, setSubtitleFile] = useState('');
+  const [subtitleError, setSubtitleError] = useState('');
   const [audio, setAudio] = useState(true);
   const [frame, setFrame] = useState(true);
   const [error, setError] = useState('');
   const input = useRef<HTMLInputElement>(null);
+  const subtitleInput = useRef<HTMLTextAreaElement>(null);
   const many = files.length > 1;
 
   function pick(selected: File[]) {
@@ -63,7 +65,15 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
     try {
       const url = link.trim() ? safeLink(link.trim()) : '';
       if (link.trim() && !url && !many) throw Error('Dùng link bắt đầu bằng https:// hoặc http://.');
-      const evidence = subtitles.trim() && !many ? readSubtitles(subtitles, subtitleFile ? 'subtitle' : 'manual') : [];
+      let evidence: Evidence[] = [];
+      if (!many && (subtitles.trim() || subtitleFile)) {
+        try { evidence = readSubtitles(subtitles, subtitleFile ? 'subtitle' : 'manual'); }
+        catch (failure) {
+          setSubtitleError(failure instanceof Error ? failure.message : 'Kiểm tra mốc thời gian trong phụ đề.');
+          subtitleInput.current?.focus();
+          return;
+        }
+      }
       const selections: (File | null)[] = files.length ? files : [null];
       const stats: VideoStats | undefined = !many && (views || orders)
         ? { views: readCount(views, 'Lượt xem'), orders: readCount(orders, 'Số đơn') } : undefined;
@@ -136,14 +146,16 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
             event.target.value = '';
             if (file && file.size > 1024 * 1024) { setError('Phụ đề tối đa 1 MB.'); return; }
             if (file) {
-              try { setSubtitles(await file.text()); setSubtitleFile(file.name); setError(''); }
+              try { setSubtitles(await file.text()); setSubtitleFile(file.name); setSubtitleError(''); setError(''); }
               catch { setError('Chưa đọc được file phụ đề.'); }
             }
           }} />
         </label></div>
-        <textarea id="clip-subtitles" value={subtitles} maxLength={200000} disabled={!!busy} placeholder="00:05 Còn 99k khi áp mã SALE99." rows={3}
-          onChange={event => { setSubtitles(event.target.value); setSubtitleFile(''); }} />
-        <small>{subtitleFile || (clip ? 'Nội dung mới sẽ thay phụ đề và ghi chú đã nhập.' : 'Mỗi dòng bắt đầu bằng phút:giây.')}</small>
+        <textarea id="clip-subtitles" ref={subtitleInput} value={subtitles} maxLength={200000} disabled={!!busy} placeholder="00:05 Còn 99k khi áp mã SALE99." rows={3}
+          aria-invalid={!!subtitleError} aria-describedby={subtitleError ? 'subtitle-error subtitle-hint' : 'subtitle-hint'}
+          onChange={event => { setSubtitles(event.target.value); setSubtitleFile(''); setSubtitleError(''); }} />
+        <small id="subtitle-hint">{subtitleFile || (clip ? 'Nội dung mới sẽ thay phụ đề và ghi chú đã nhập.' : 'Mỗi dòng bắt đầu bằng phút:giây.')}</small>
+        {subtitleError && <p id="subtitle-error" className="form-error" role="alert">{subtitleError}</p>}
       </div>}
       {error && <p className="form-error" role="alert"><CircleAlert size={16} /> {error}</p>}
       {busy && <p className="progress-message" role="status"><LoaderCircle size={16} className="spin" /> {busy}</p>}
@@ -174,7 +186,13 @@ export function OfferDialog({ offers, onSave, onClose }: { offers: Offer[]; onSa
     setSaving(true);
     setError('');
     try {
-      await onSave(validateOffers(rows.map(row => ({ ...row, price: readPrice(row.price) }))));
+      const offers = rows.map((row, index) => {
+        try { return { ...row, price: readPrice(row.price) }; }
+        catch (failure) {
+          throw Error(`Dòng ${index + 1}: ${failure instanceof Error ? failure.message : 'Giá không hợp lệ.'}`);
+        }
+      });
+      await onSave(validateOffers(offers));
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Chưa lưu được bảng.');
     } finally { setSaving(false); }
