@@ -49,7 +49,7 @@ export function readDelimited(input: string): string[][] {
   return rows;
 }
 
-function sheetText(value: unknown) {
+export function sheetText(value: unknown) {
   if (value instanceof Date) {
     if (Number.isNaN(value.getTime())) throw Error('Ngày trong Excel không hợp lệ.');
     const iso = value.toISOString();
@@ -107,17 +107,24 @@ export function rowsToOffers(rows: unknown[][]) {
   }));
 }
 
-export async function importOffers(file: File) {
-  if (file.size > MAX_SHEET_BYTES) throw Error('Bảng ưu đãi vượt quá 5 MB.');
+export async function readTableFile(file: File) {
+  if (file.size > MAX_SHEET_BYTES) throw Error('Bảng vượt quá 5 MB.');
   if (/\.xlsx$/i.test(file.name)) {
     const { readSheet } = await import('read-excel-file/browser');
     const rows = await readSheet(file);
     if (!rows.length) throw Error('Trang tính đầu tiên đang trống.');
     if (rows.length > MAX_ROWS + 1 || rows.some(row => row.length > 100)) throw Error('Giảm bảng xuống 2.000 dòng và 100 cột.');
-    return rowsToOffers(rows);
+    return rows;
   }
   if (!/\.(csv|tsv)$/i.test(file.name)) throw Error('Chọn file .xlsx, .csv hoặc .tsv.');
-  return rowsToOffers(readDelimited(await file.text()));
+  const rows = readDelimited(await file.text());
+  if (!rows.length) throw Error('Bảng trống.');
+  if (rows.length > MAX_ROWS + 1 || rows.some(row => row.length > 100)) throw Error('Giảm bảng xuống 2.000 dòng và 100 cột.');
+  return rows;
+}
+
+export async function importOffers(file: File) {
+  return rowsToOffers(await readTableFile(file));
 }
 
 function cueTime(label: string): number | null {
@@ -180,13 +187,14 @@ export function auditCsv(audit: Audit, clips: ClipSummary[], reviews: Record<str
     const clip = index.get(result.clipId);
     if (!clip) return [];
     return result.findings.map(finding => [
-      clip.title, clip.sku, clip.link, finding.evidence ? timestamp(finding.evidence.start) : '',
+      clip.title, clip.sku, clip.link, clip.videoId ?? '', clip.creator ?? '', clip.stats?.views ?? null, clip.stats?.orders ?? null,
+      finding.evidence ? timestamp(finding.evidence.start) : '',
       kindLabels[finding.kind], verdictLabels[finding.verdict], finding.claim,
       finding.evidence ? sourceLabels[finding.evidence.source] : '', finding.evidence?.text ?? '',
       finding.reference, finding.reason, reviews[finding.id] ? reviewLabels[reviews[finding.id]] : '', notes[finding.id] ?? '', audit.checkedAt,
     ]);
   });
-  return csv([['Video', 'SKU', 'Link', 'Mốc thời gian', 'Nhóm', 'Kết quả', 'Thông tin trong clip',
+  return csv([['Video', 'SKU', 'Link', 'ID video', 'Nhà sáng tạo', 'Lượt xem đã nhập', 'Đơn đã nhập', 'Mốc thời gian', 'Nhóm', 'Kết quả', 'Thông tin trong clip',
     'Nguồn', 'Bằng chứng', 'Bảng ưu đãi', 'Lý do', 'Phản hồi', 'Ghi chú', 'Thời điểm rà (UTC+7)'], ...rows]);
 }
 

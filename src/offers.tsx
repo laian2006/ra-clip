@@ -4,7 +4,7 @@ import { displayDate, money, offerKey } from './domain';
 import type { Clip, Offer, OfferVersion } from './domain';
 import { csv, download, offersCsv, templateRows } from './files';
 import { changedSkus, compareOffers, type OfferField } from './audit';
-import { Empty } from './ui';
+import { Empty, TableRegion } from './ui';
 
 const fieldNames: Record<OfferField, string> = {
   name: 'Tên sản phẩm', price: 'Giá', gift: 'Quà tặng',
@@ -72,7 +72,7 @@ export function OffersView({ versions, clips, onImport, onEdit, busy }: {
           </article>)}</div>
           : <p className="empty-inline">Hai phiên bản có cùng các dòng ưu đãi.</p>}
       </div> : viewing ? <>
-        <div className="table-wrap"><table>
+        <TableRegion label="Bảng ưu đãi. Có thể cuộn ngang nếu cần."><table>
           <thead><tr><th scope="col">Sản phẩm</th><th scope="col">Voucher</th><th scope="col">Giá</th><th scope="col">Quà tặng</th><th scope="col">Thời hạn</th><th scope="col">Điều kiện</th></tr></thead>
           <tbody>{viewing.offers.map(row => <tr key={offerKey(row)}>
             <td><strong>{row.name || row.sku}</strong><small>{row.sku}</small></td>
@@ -81,7 +81,7 @@ export function OffersView({ versions, clips, onImport, onEdit, busy }: {
             <td>{row.end ? <><span>{displayDate(row.end)}</span>{row.end.length > 10 && <small>{row.end.slice(11)}</small>}</> : '—'}</td>
             <td>{row.condition || '—'}</td>
           </tr>)}</tbody>
-        </table></div>
+        </table></TableRegion>
         <div className="table-footer">
           <span><Clock3 size={15} /> {previous ? `${changed} SKU đổi so với v${index}` : 'Phiên bản đầu tiên'}</span>
           <button className="text-button" onClick={() => download(offersCsv(viewing.offers), `uu-dai-v${index + 1}.csv`)}><Download size={15} /> Xuất bảng này</button>

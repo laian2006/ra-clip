@@ -12,7 +12,7 @@ export function leadVerdict(findings: Finding[]) {
 
 export const triggerLabels: Record<AuditTrigger, string> = {
   manual: 'Rà soát thủ công', offers: 'Đổi bảng ưu đãi', clips: 'Cập nhật kho video',
-  evidence: 'Cập nhật đoạn trích', baseline: 'Bản rà trước đây',
+  evidence: 'Cập nhật đoạn trích', batch: 'Quét video hàng loạt', baseline: 'Bản rà trước đây',
 };
 
 export function reviewOpen(value: Review | undefined) {
@@ -37,7 +37,7 @@ function snapshot(workspace: Workspace, trigger: AuditTrigger, recordedAt: strin
     id: crypto.randomUUID(), trigger, recordedAt,
     versionNumber: workspace.versions.findIndex(version => version.id === audit.versionId) + 1,
     audit: { ...audit, results: audit.results.map(row => ({ ...row, signature: '' })) },
-    clips: workspace.clips.map(({ id, title, sku, link }) => ({ id, title, sku, link })),
+    clips: workspace.clips.map(({ id, title, sku, link, videoId, creator, stats }) => ({ id, title, sku, link, videoId, creator, stats })),
     reviews: Object.fromEntries(Object.entries(workspace.reviews).filter(([id]) => ids.has(id))),
     notes: Object.fromEntries(Object.entries(workspace.notes ?? {}).filter(([id]) => ids.has(id))),
   };
@@ -50,13 +50,17 @@ export function prepareWorkspace(workspace: Workspace): Workspace {
   return { ...workspace, snapshots: baseline, notes: workspace.notes ?? {} };
 }
 
-export function updatedReport(workspace: Workspace, trigger: AuditTrigger): Workspace {
+export function recordAudit(workspace: Workspace, trigger: AuditTrigger): Workspace {
+  const history = workspace.snapshots ?? [];
+  if (!workspace.audit || (!workspace.clips.length && !history.length)) return workspace;
+  return { ...workspace, snapshots: [...history.slice(-39), snapshot(workspace, trigger, localTime())] };
+}
+
+export function updatedReport(workspace: Workspace, trigger: AuditTrigger, keepSnapshot = true): Workspace {
   if (!workspace.versions.length) return { ...workspace, audit: null };
   const audit = runAudit(workspace.clips, workspace.versions, workspace.checkedAt, trigger === 'manual' ? null : workspace.audit);
   const next = { ...workspace, audit };
-  const history = workspace.snapshots ?? [];
-  if (!workspace.clips.length && !history.length) return next;
-  return { ...next, snapshots: [...history.slice(-39), snapshot(next, trigger, localTime())] };
+  return keepSnapshot ? recordAudit(next, trigger) : next;
 }
 
 export function setReviews(workspace: Workspace, ids: string[], review: Review | '') {

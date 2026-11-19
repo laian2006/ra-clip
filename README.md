@@ -29,7 +29,9 @@ Danh sách 9 tình huống và mốc kiểm tra có trong [kho video mẫu](docs
 - **Chiến dịch:** mở **Quản lý chiến dịch** để tạo hoặc đổi tên từng đợt sale. Mỗi chiến dịch có kho video, bảng ưu đãi, phản hồi và nhật ký riêng. Chọn **Dùng dữ liệu của bạn** để vào không gian mặc định. Dữ liệu đã lưu bằng phiên bản 1.0 vẫn mở trong không gian này.
 - **Bảng ưu đãi:** nhập trang đầu của XLSX hoặc file CSV/TSV có các cột `sku, name, voucher, price, gift, start, end, condition`. Dùng mẫu CSV trong app. Mỗi cặp SKU và voucher là một dòng. Dòng không có mã đại diện cho giá hoặc ưu đãi thông thường. Giá tính bằng VNĐ, thời hạn dùng giờ Việt Nam (UTC+7).
 - **Kho video:** thêm MP4, WebM, M4V hoặc MOV mà trình duyệt đọc được, tối đa 150 MB và 2 phút mỗi file, tối đa 20 file mỗi lượt. Gán SKU, ngày đăng và kiểu video. Có thể dùng phụ đề SRT/VTT hoặc ghi chú như `00:05 Còn 99k khi áp mã SALE99.`
-- **Rà và xử lý:** chọn thời điểm, sửa các đoạn AI đọc nhầm, đánh dấu việc riêng lẻ hoặc hàng loạt rồi tải CSV. Khi lưu bảng mới, app chỉ tính lại SKU đã đổi hoặc clip có dữ liệu mới. Khi đổi thời điểm, app tính lại toàn bộ kho. Nhật ký lưu tối đa 40 báo cáo gần nhất.
+- **Nhập danh sách video.** từ **Kho video** chọn **Nhập danh sách** và tải mẫu CSV nếu cần. App xem trước dòng mới, dòng cập nhật, dòng trùng và dòng lỗi. Link hoặc ID nhận diện video. Cập nhật giữ file và đoạn trích đã lưu. Cột có thể nhập gồm `title, sku, link, published, format, video_id, creator, views, orders`. Với ID dài trong Excel, đặt ô ở dạng văn bản hoặc dùng link TikTok đầy đủ. Các số liệu là số được nhập vào chiến dịch.
+- **Quét hàng loạt.** chọn tối đa 20 video đã có file, chọn đọc chữ, lời thoại hoặc cả hai. Kết quả mỗi video được lưu ngay. Khi dừng, phần còn lại được giữ trong lựa chọn. Dùng bộ lọc trong kho để tìm clip thiếu SKU, bằng chứng hoặc file.
+- **Rà và xử lý:** chọn thời điểm, sửa các đoạn AI đọc nhầm, đánh dấu việc riêng lẻ hoặc hàng loạt rồi tải CSV. Khi lưu bảng mới, app chỉ tính lại SKU đã đổi hoặc clip có dữ liệu mới. Khi đổi thời điểm, app tính lại toàn bộ kho. Nhật ký lưu tối đa 40 báo cáo gần nhất. Sắp xếp danh sách việc theo mức cần xử lý, số đơn hoặc lượt xem đã nhập.
 - **Sao lưu:** tải file `.raclip` từ màn hình quản lý, kèm video đã nhập, ưu đãi, đoạn trích, ghi chú và báo cáo. Mở file để tạo một chiến dịch riêng. Mỗi bản sao lưu hỗ trợ tối đa 1 GB.
 
 ## Cách hoạt động
@@ -40,6 +42,16 @@ Lần đầu dùng lời thoại, trình duyệt tải mô hình khoảng 80 MB 
 
 Kết quả phản ánh bảng shop nhập tại thời điểm rà. Giá theo từng khách hoặc điều kiện thanh toán cần dữ liệu tương ứng. AI có thể bỏ sót chữ xuất hiện trong thời gian ngắn hoặc đọc sai lời thoại có nhạc nền. Dùng clip gốc và trạng thái **Cần xác nhận** để kiểm tra các đoạn mơ hồ.
 
+[Ảnh màn hình xem trước bảng video](docs/nhap-danh-sach.png).
+
+Lý do chọn các tính năng này được ghi trong [nhu cầu vận hành và khả năng tiếp cận](docs/nhu-cau-va-tiep-can.md).
+
+## Dùng bằng bàn phím và phụ đề
+
+Nhấn **Tab** từ đầu trang để tới **Bỏ qua điều hướng**. Khi mở trang hoặc một phát hiện, tiêu điểm chuyển tới nội dung tương ứng. **Escape** đóng hộp thoại khi app đang chờ thao tác và đưa tiêu điểm về nút vừa mở. Có thể dùng bàn phím cuộn các bảng rộng trong vùng bảng.
+
+Nút **Phụ đề** bật hoặc tắt chữ trên video và ghi nhớ lựa chọn khi chuyển clip. Với video riêng, app ưu tiên phụ đề đã nhập, rồi tới lời thoại nhận dạng hoặc đoạn nhập tay. Có thể sửa lời thoại từ mục **Đoạn trích**. Phụ đề demo đi cùng từng file.
+
 ## Kiểm thử
 
 ```sh
@@ -49,6 +61,6 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-Kiểm thử bao gồm nhập Excel, báo cáo CSV, sửa đoạn trích, phát video mẫu, cập nhật theo SKU, nhật ký, sao lưu video và chuyển dữ liệu từ bản cũ. Bật `RA_CLIP_TEST_MODELS=1` để tải và thử PhoWhisper trong trình duyệt. Có thể chọn Edge đã cài bằng `RA_CLIP_BROWSER=msedge`.
+Kiểm thử bao gồm nhập Excel/CSV, lọc trùng, ưu tiên theo số đơn, quét hàng loạt và dừng an toàn, phụ đề, điều hướng bàn phím, kiểm tra axe, sao lưu và chuyển dữ liệu từ bản cũ. Bật `RA_CLIP_TEST_MODELS=1` để tải và thử PhoWhisper trong trình duyệt. Có thể chọn Edge đã cài bằng `RA_CLIP_BROWSER=msedge`.
 
 Mã nguồn theo [MIT](LICENSE). Hình ảnh, lời thoại và dữ liệu video minh họa được tạo riêng cho demo. [Ghi chú về thành phần bên thứ ba](THIRD_PARTY.md)

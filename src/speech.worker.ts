@@ -19,8 +19,8 @@ const createTranscriber = pipeline as unknown as
 
 let model: Promise<AutomaticSpeechRecognitionPipeline> | undefined;
 
-async function recognize(samples: Float32Array) {
-  model ??= createTranscriber('automatic-speech-recognition', 'huuquyet/PhoWhisper-base', {
+function downloadModel() {
+  return createTranscriber('automatic-speech-recognition', 'huuquyet/PhoWhisper-base', {
     device: 'wasm',
     dtype: 'q8',
     revision: '7623a803636be73f54c30dfa4ce1c42cdc9bbbcf',
@@ -30,6 +30,20 @@ async function recognize(samples: Float32Array) {
       }
     },
   });
+}
+
+async function loadModel() {
+  try { return await downloadModel(); }
+  catch (error) {
+    if (!/fetch|network|HTTP (408|429|5\d\d)/i.test(error instanceof Error ? error.message : String(error))) throw error;
+    self.postMessage({ kind: 'progress', message: 'Kết nối tải mô hình bị gián đoạn. Đang thử lại…' });
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    return downloadModel();
+  }
+}
+
+async function recognize(samples: Float32Array) {
+  model ??= loadModel();
   const transcriber = await model;
   self.postMessage({ kind: 'progress', message: 'Đang nhận dạng lời thoại tiếng Việt…' });
   const output = await transcriber(samples, {

@@ -1,14 +1,16 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { ArrowUpFromLine, CircleAlert, CirclePlus, FileText, LoaderCircle, Trash2 } from 'lucide-react';
 import { clipFormats, normalizeCode, safeLink } from './domain';
-import type { Clip, ClipFormat, Evidence, Offer } from './domain';
+import type { Clip, ClipFormat, Evidence, Offer, VideoStats } from './domain';
+import { readCount } from './catalog';
 import { readPrice, readSubtitles } from './files';
 import { validateOffers } from './audit';
 import { type ScanOptions, validateVideo } from './media';
 import { Modal } from './ui';
 
 export interface DraftClip {
-  title: string; sku: string; link: string; published: string; format?: ClipFormat; evidence: Evidence[]; file: File | null;
+  title: string; sku: string; link: string; published: string; format?: ClipFormat;
+  creator?: string; stats?: VideoStats; evidence: Evidence[]; file: File | null;
 }
 
 export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
@@ -24,6 +26,9 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
   const [link, setLink] = useState(clip?.link ?? '');
   const [published, setPublished] = useState(clip?.published ?? '');
   const [format, setFormat] = useState<ClipFormat | ''>(clip?.format ?? '');
+  const [creator, setCreator] = useState(clip?.creator ?? '');
+  const [views, setViews] = useState(clip?.stats?.views?.toString() ?? '');
+  const [orders, setOrders] = useState(clip?.stats?.orders?.toString() ?? '');
   const [files, setFiles] = useState<File[]>([]);
   const [fileSkus, setFileSkus] = useState<string[]>([]);
   const [subtitles, setSubtitles] = useState('');
@@ -41,6 +46,10 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
       }
       selected.forEach(validateVideo);
       setFiles(selected);
+      if (selected.length > 1 && files.length <= 1) {
+        setAudio(false);
+        setFrame(false);
+      }
       setFileSkus(selected.map(() => ''));
       setError('');
     } catch (failure) {
@@ -56,10 +65,13 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
       if (link.trim() && !url && !many) throw Error('Dùng link bắt đầu bằng https:// hoặc http://.');
       const evidence = subtitles.trim() && !many ? readSubtitles(subtitles, subtitleFile ? 'subtitle' : 'manual') : [];
       const selections: (File | null)[] = files.length ? files : [null];
+      const stats: VideoStats | undefined = !many && (views || orders)
+        ? { views: readCount(views, 'Lượt xem'), orders: readCount(orders, 'Số đơn') } : undefined;
       const drafts = selections.map((file, index) => ({
         title: (!many && title.trim()) || file?.name.replace(/\.[^.]+$/, '') || '',
         sku: normalizeCode(fileSkus[index]?.trim() || sku),
         link: many ? '' : url, published, format: format || undefined, evidence, file,
+        creator: !many && creator.trim() ? creator.trim() : undefined, stats,
       }));
       if (drafts.some(item => !item.title)) throw Error('Nhập tên video.');
       if (drafts.some(item => item.title.length > 140)) throw Error('Tên video tối đa 140 ký tự.');
@@ -101,10 +113,18 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
           {Object.entries(clipFormats).map(([key, name]) => <option value={key} key={key}>{name}</option>)}
         </select></label>
       </div>
+      {!many && <details className="clip-stats-editor" open={Boolean(creator || views || orders) || undefined}>
+        <summary>Nhà sáng tạo và số liệu đã ghi nhận</summary>
+        <div className="form-grid">
+          <label>Nhà sáng tạo<input value={creator} maxLength={100} onChange={event => setCreator(event.target.value)} disabled={!!busy} /></label>
+          <label>Lượt xem đã nhập<input value={views} inputMode="numeric" maxLength={24} onChange={event => setViews(event.target.value)} disabled={!!busy} /></label>
+          <label>Số đơn đã nhập<input value={orders} inputMode="numeric" maxLength={24} onChange={event => setOrders(event.target.value)} disabled={!!busy} /></label>
+        </div>
+      </details>}
       {files.length > 0 && <fieldset className="scan-options"><legend>Phân tích trên thiết bị</legend>
         <label><input type="checkbox" checked={audio} onChange={event => setAudio(event.target.checked)} disabled={!!busy} /> Lời thoại</label>
         <label><input type="checkbox" checked={frame} onChange={event => setFrame(event.target.checked)} disabled={!!busy} /> Chữ trên khung hình</label>
-        <small>Lần đầu trình duyệt tải mô hình. Video được xử lý tại chỗ.</small>
+        <small>{many ? 'Có thể lưu file trước rồi quét hàng loạt trong Kho video.' : 'Lần đầu trình duyệt tải mô hình. Video được xử lý tại chỗ.'}</small>
       </fieldset>}
       {!many && <div className="subtitle-label">
         <div><label htmlFor="clip-subtitles">Phụ đề hoặc ghi chú</label>

@@ -1,0 +1,5 @@
+# Nhu cầu vận hành và khả năng tiếp cận
+
+- **Nhận bảng từ đội vận hành.** Seller Center mô tả việc lọc kho video bán hàng và xuất báo cáo với các số liệu tùy chọn. Rà Clip có thêm một bước xem trước để đối chiếu link hoặc ID, tìm dòng trùng và nhập phần hợp lệ vào kho. Mẫu CSV là định dạng tham chiếu khi tiêu đề cột trên báo cáo thay đổi. [TikTok Shop Academy, 27/08/2026](https://seller-be.tiktok.com/university/essay?knowledge_id=1347196965259021&lang=en-GB)
+- **Xếp thứ tự rà sau sale.** Hướng dẫn công khai của TopKOC đề xuất theo dõi từng video, ghi tình trạng ưu đãi và xác định người xử lý. Rà Clip giữ báo cáo theo clip, cho sắp xếp theo lượt xem hoặc số đơn đã nhập, và lưu kết quả quét từng file để tiếp tục khi cần. Việc sắp xếp chỉ tham chiếu số liệu có trong bảng. [TopKOC, 23/10/2026](https://topkoc.vn/video-koc-het-uu-dai/)
+- **Theo dõi bằng bàn phím hoặc phụ đề.** Các bài kiểm thử kiểm tra bỏ qua điều hướng, tiêu điểm khi mở và đóng hộp thoại, điều khiển phụ đề và các quy tắc axe trên những màn hình chính. Kiểm tra tự động bao phủ một phần yêu cầu của WCAG 2.2. [W3C WCAG 2.2](https://www.w3.org/TR/WCAG22/)

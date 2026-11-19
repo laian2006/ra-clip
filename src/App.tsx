@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDownToLine, ArrowRight, ArrowUpRight, BookOpen, CheckCircle2, ChevronDown, CircleAlert,
   CircleHelp, Clapperboard, ClipboardList, FileSpreadsheet, Film, FolderOpen, Github, History, LayoutDashboard, LoaderCircle,
-  Plus, ScanLine, ShieldCheck, SwitchCamera, X,
+  Plus, ScanLine, ShieldCheck, SwitchCamera, Upload, X,
 } from 'lucide-react';
 import { ClipDetail, ClipList, Metrics } from './dashboard';
 import { CampaignManager } from './campaigns';
@@ -10,15 +10,19 @@ import { EvidenceDialog } from './evidence';
 import { HistoryView } from './history';
 import { QueueView } from './queue';
 import { makeBackup, readBackup } from './backup';
+import { CatalogDialog } from './catalog-dialog';
+import { applyCatalog, planCatalog, tiktokId } from './catalog';
+import { BatchDialog } from './batch-dialog';
+import { analyzeStoredClip, failScan, scanReceipt, type BatchEvent } from './batch';
 import {
-  changeEvidence, leadVerdict, mergeScan, prepareWorkspace, queueEntries, reviewOpen, setFindingNote, setReviews, updatedReport,
+  changeEvidence, leadVerdict, prepareWorkspace, queueEntries, recordAudit, reviewOpen, setFindingNote, setReviews, updatedReport,
 } from './workflow';
 import { ClipDialog, OfferDialog, type DraftClip } from './dialogs';
 import { displayDate, localTime, verdictLabels } from './domain';
 import type { Campaign, CampaignDraft, Clip, Evidence, Finding, Offer, Review, Verdict, Workspace } from './domain';
 import { auditCsv, download, downloadBlob, importOffers } from './files';
 import { analyzeVideo, videoMetadata, type ScanOptions } from './media';
-import { demoAsset, emptyWorkspace, refreshDemo, sampleWorkspace } from './demo';
+import { emptyWorkspace, refreshDemo, sampleWorkspace } from './demo';
 import { OffersView } from './offers';
 import { createCampaign, listCampaigns, loadMedia, loadWorkspace, renameCampaign, saveWorkspace, type MediaChange } from './storage';
 import { Brand, Modal } from './ui';
@@ -79,7 +83,7 @@ export function App() {
   const [filter, setFilter] = useState<Verdict | 'all'>('all');
   const [selected, setSelected] = useState('');
   const [date, setDate] = useState('');
-  const [dialog, setDialog] = useState<'clip' | 'offers' | 'delete' | 'campaigns' | 'evidence' | null>(null);
+  const [dialog, setDialog] = useState<'clip' | 'offers' | 'delete' | 'campaigns' | 'evidence' | 'catalog' | 'batch' | null>(null);
   const [editing, setEditing] = useState<Clip>();
   const [evidenceIndex, setEvidenceIndex] = useState<number | null>(null);
   const [findingFocus, setFindingFocus] = useState('');
@@ -90,6 +94,7 @@ export function App() {
   const importInput = useRef<HTMLInputElement>(null);
   const writing = useRef(false);
   const opening = useRef(false);
+  const pageHeading = useRef<HTMLHeadingElement>(null);
 
   async function open(id: string) {
     if (writing.current || opening.current) throw Error('Chờ thao tác hiện tại trước khi chuyển chiến dịch.');
@@ -146,17 +151,23 @@ export function App() {
         setCampaigns(items => items.map(item => item.id === active
           ? { ...item, updatedAt: localTime(), clipCount: current, todoCount: openItems } : item));
       }
+      return saved;
     } finally { writing.current = false; }
   }
 
   function notify(text: string, error = false) { setNotice({ text, error }); }
   function startAdd() { setEditing(undefined); setDialog('clip'); }
-  function go(next: Page) { setPage(next); setFilter('all'); setFindingFocus(''); }
+  function go(next: Page) {
+    setPage(next); setFilter('all'); setFindingFocus('');
+    requestAnimationFrame(() => pageHeading.current?.focus());
+  }
   function openFinding(clip: Clip, finding: Finding) {
     setPage('report'); setFilter('all'); setSelected(clip.id); setFindingFocus(finding.id);
-    if (window.matchMedia('(max-width: 760px)').matches) {
-      requestAnimationFrame(() => document.getElementById('clip-evidence')?.scrollIntoView({ block: 'start' }));
-    }
+    requestAnimationFrame(() => {
+      const evidence = document.getElementById('clip-evidence');
+      evidence?.focus({ preventScroll: true });
+      evidence?.scrollIntoView({ block: 'nearest' });
+    });
   }
   function startEvidence(clip: Clip, index: number | null) {
     setEditing(clip); setEvidenceIndex(index); setDialog('evidence');
@@ -231,6 +242,51 @@ export function App() {
     finally { setBusy(''); }
   }
 
+  async function importCatalog(rows: unknown[][]) {
+    const plan = planCatalog(rows, data.clips);
+    const count = plan.filter(row => row.state === 'add' || row.state === 'update').length;
+    if (!count) throw Error('Bảng này chưa có dòng hợp lệ cần lưu.');
+    const clips = applyCatalog(data.clips, plan);
+    await persist(updatedReport({ ...data, clips }, 'clips'));
+    clearDialog();
+    notify(`Đã nhập ${count} video vào kho.`);
+  }
+
+  async function scanBatch(ids: string[], options: ScanOptions, signal: AbortSignal, onEvent: (event: BatchEvent) => void) {
+    let current = data;
+    const processed = new Set<string>();
+    let success = 0;
+    let warnings = 0;
+    for (const id of ids) {
+      if (signal.aborted) break;
+      const clip = current.clips.find(row => row.id === id);
+      if (!clip) continue;
+      onEvent({ id, state: 'running', detail: 'Đang mở file video…' });
+      let next: Clip;
+      try {
+        next = await analyzeStoredClip(clip, options, signal, detail => onEvent({ id, state: 'running', detail }));
+      } catch (failure) {
+        if (signal.aborted) {
+          onEvent({ id, state: 'stopped', detail: 'Dừng trước khi lưu kết quả video này.' });
+          break;
+        }
+        next = failScan(clip, options, errorText(failure));
+      }
+      const receipt = next.lastScan!;
+      const clips = current.clips.map(row => row.id === id ? next : row);
+      current = await persist(updatedReport({ ...current, clips }, 'batch', false));
+      for (const refreshed of current.audit?.refreshed ?? []) processed.add(refreshed);
+      if (receipt.state === 'ready') success++;
+      else warnings++;
+      onEvent({ id, state: receipt.state, detail: receipt.detail });
+    }
+    if (current.audit && success + warnings > 0) {
+      await persist(recordAudit({ ...current, audit: { ...current.audit, refreshed: [...processed] } }, 'batch'));
+    }
+    const label = signal.aborted ? 'Đã dừng lượt quét.' : 'Đã xong lượt quét.';
+    notify(`${label} ${success} video có kết quả · ${warnings} cần xem lại.`);
+  }
+
   async function saveClips(drafts: DraftClip[], options: ScanOptions) {
     const controller = new AbortController();
     cancel.current = controller;
@@ -243,6 +299,7 @@ export function App() {
         controller.signal.throwIfAborted();
         const id = editing?.id ?? crypto.randomUUID();
         let evidence = editing?.evidence ?? [];
+        let lastScan = draft.file ? undefined : editing?.lastScan;
         if (draft.evidence.length) evidence = evidence.filter(row => row.source === 'audio' || row.source === 'frame');
         if (draft.file) {
           const file = draft.file;
@@ -251,6 +308,7 @@ export function App() {
             const result = await analyzeVideo(file, options, message =>
               setBusy(`${index + 1}/${drafts.length} · ${message}`), controller.signal);
             evidence = [...evidence, ...result.evidence];
+            lastScan = scanReceipt(options, result.evidence.length, result.notes);
             warnings.push(...result.notes.map(note => `${draft.title} · ${note}`));
           } else {
             setBusy(`${index + 1}/${drafts.length} · Kiểm tra video…`);
@@ -259,7 +317,10 @@ export function App() {
           media.push({ id, blob: file });
         }
         rows.push({
+          ...editing,
           id, title: draft.title, sku: draft.sku, link: draft.link, published: draft.published, format: draft.format,
+          videoId: draft.link && draft.link !== editing?.link ? tiktokId(draft.link) || undefined : editing?.videoId,
+          creator: draft.creator, stats: draft.stats, lastScan,
           evidence: [...evidence, ...draft.evidence].sort((a, b) => a.start - b.start),
           localMedia: Boolean(draft.file || editing?.localMedia),
           demoMedia: draft.file ? undefined : editing?.demoMedia,
@@ -287,20 +348,19 @@ export function App() {
     const controller = new AbortController();
     cancel.current = controller;
     setBusy('Đang mở video…');
+    const options = { audio: true, frame: true };
     try {
-      const blob = clip.localMedia ? await loadMedia(clip.id)
-        : await fetch(`${demoAsset(clip)}.webm`, { signal: controller.signal }).then(res => {
-          if (!res.ok) throw Error('Chưa mở được video mẫu.');
-          return res.blob();
-        });
-      if (!blob) throw Error('File video vắng mặt trong bộ nhớ trình duyệt.');
-      const result = await analyzeVideo(blob, { audio: true, frame: true }, setBusy, controller.signal);
-      if (!result.evidence.length) throw Error(result.notes.join(' · ') || 'Chưa trích được lời thoại hoặc chữ.');
-      const clips = data.clips.map(row => row.id === clip.id ? mergeScan(row, result.evidence) : row);
+      let next: Clip;
+      try { next = await analyzeStoredClip(clip, options, controller.signal, setBusy); }
+      catch (failure) {
+        controller.signal.throwIfAborted();
+        next = failScan(clip, options, errorText(failure));
+      }
+      const clips = data.clips.map(row => row.id === clip.id ? next : row);
       setBusy('Đang lưu bằng chứng…');
       cancel.current = null;
       await persist(updatedReport({ ...data, clips }, 'evidence'));
-      notify(`Đã đọc ${result.evidence.length} đoạn.${result.notes.length ? ' ' + result.notes.join(' · ') : ''}`, result.notes.length > 0);
+      notify(next.lastScan!.detail, next.lastScan!.state !== 'ready');
     } catch (error) { notify(controller.signal.aborted ? 'Đã dừng phân tích video.' : errorText(error), !controller.signal.aborted); }
     finally { setBusy(''); cancel.current = null; }
   }
@@ -364,7 +424,10 @@ export function App() {
   }
 
   return <div className="app-shell">
-    <aside className="sidebar">
+    <a className="skip-link" href="#main-content" onClick={event => {
+      event.preventDefault(); document.getElementById('main-content')?.focus();
+    }}>Bỏ qua điều hướng</a>
+    <aside className="sidebar" aria-label="Không gian và điều hướng">
       <div className="sidebar-top"><Brand />
         <div className="workspace-switch">
           <span className="workspace-icon"><Clapperboard size={18} /></span>
@@ -392,7 +455,7 @@ export function App() {
       </div>
     </aside>
 
-    <main className="main">
+    <main className="main" id="main-content" tabIndex={-1}>
       <header className="topbar"><div className="breadcrumb"><span>{data.demo ? 'Không gian mẫu' : campaign?.name ?? 'Không gian của shop'}</span><span>/</span><strong>{pages.find(item => item.id === page)?.label}</strong></div>
         <div className="top-actions">
           <button className="button secondary" onClick={exportReport} disabled={!data.audit || !data.clips.length || !!busy}><ArrowDownToLine size={17} /> Xuất báo cáo</button>
@@ -401,7 +464,7 @@ export function App() {
       </header>
       <div className="main-content">
         <div className="page-title">
-          <div><h1>{title[page]}</h1><p>{descriptions[page]}</p></div>
+          <div><h1 id="page-heading" ref={pageHeading} tabIndex={-1}>{title[page]}</h1><p>{descriptions[page]}</p></div>
           {page === 'report' && <span className="activity-pill"><span /> {data.audit ? `Đã rà ${results.length} video` : 'Chưa có lần rà'}</span>}
         </div>
         {data.demo && page === 'report' && <div className="demo-banner">
@@ -429,6 +492,13 @@ export function App() {
           {dateChanged && <p className="date-changed">Vừa đổi thời điểm. Chọn Rà soát ngay để cập nhật báo cáo {data.audit ? `ngày ${displayDate(data.audit.checkedAt)}` : ''}.</p>}
           <Metrics results={results} filter={filter} onFilter={setFilter} />
         </>}
+        {page === 'clips' && <section className="library-work" aria-label="Nhập và quét kho video">
+          <div><strong>{data.clips.length} video</strong><span>{data.clips.filter(clip => !clip.sku).length} chưa gán SKU</span>
+            <span>{data.clips.filter(clip => !clip.evidence.length).length} chưa có bằng chứng</span></div>
+          <div><button className="button secondary" disabled={!!busy} onClick={() => setDialog('catalog')}><Upload size={16} /> Nhập danh sách</button>
+            <button className="button dark" disabled={!!busy || !data.clips.some(clip => clip.localMedia || clip.demoMedia)}
+              onClick={() => setDialog('batch')}><ScanLine size={16} /> Quét hàng loạt</button></div>
+        </section>}
         {(page === 'report' || page === 'clips') && <div className="board">
           {page === 'report' && filter !== 'all' && <div className="filter-strip">Đang lọc: {verdictLabels[filter]}
             <button className="text-button" onClick={() => setFilter('all')}>Xóa bộ lọc <X size={14} /></button></div>}
@@ -454,6 +524,8 @@ export function App() {
       }} />
     {dialog === 'clip' && <ClipDialog clip={editing} skus={[...new Set(version?.offers.map(row => row.sku) ?? [])]}
       onClose={clearDialog} onSave={saveClips} busy={busy} onCancel={() => cancel.current?.abort()} />}
+    {dialog === 'catalog' && <CatalogDialog clips={data.clips} onApply={importCatalog} onClose={clearDialog} />}
+    {dialog === 'batch' && <BatchDialog clips={data.clips} onRun={scanBatch} onClose={clearDialog} />}
     {dialog === 'campaigns' && <CampaignManager items={campaigns} active={active} onOpen={launchCampaign}
       onCreate={addCampaign} onRename={changeCampaign} onBackup={exportCampaign} onRestore={restoreCampaign} onClose={clearDialog} />}
     {dialog === 'evidence' && <EvidenceDialog row={evidenceIndex === null ? undefined : editing?.evidence[evidenceIndex]}

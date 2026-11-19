@@ -3,7 +3,7 @@ import { localTime } from './domain';
 import { runAudit } from './audit';
 import { prepareWorkspace, updatedReport } from './workflow';
 
-const pack = 2;
+const pack = 3;
 const checkedAt = '2026-11-12T09:00';
 const segment = (start: number, text: string, source: Evidence['source'] = 'subtitle', duration = 3): Evidence =>
   ({ start, end: source === 'frame' ? null : start + duration, text, source });
@@ -37,12 +37,19 @@ const demoFormats: Record<string, ClipFormat> = {
   canvas: 'review', fan: 'live', cups: 'combo', mouse: 'unbox',
   lamp: 'promo', pouch: 'review', tee: 'affiliate', soap: 'promo',
 };
+const demoStats: Record<string, { views: number; orders: number }> = {
+  canvas: { views: 12000, orders: 18 }, fan: { views: 95000, orders: 42 }, cups: { views: 26800, orders: 38 },
+  mouse: { views: 9100, orders: 4 }, lamp: { views: 34000, orders: 77 }, pouch: { views: 18400, orders: 21 },
+  tee: { views: 26000, orders: 150 }, soap: { views: 12200, orders: 7 },
+};
 const demoClip = (media: string, title: string, sku: string, evidence: Evidence[], published = '2026-11-11'): Clip =>
-  ({ id: `demo-${media}`, title, sku, link: '', published, format: demoFormats[media], evidence, localMedia: false, demoMedia: media });
+  ({ id: `demo-${media}`, title, sku, link: '', published, format: demoFormats[media],
+    creator: 'KOC minh họa', stats: demoStats[media], evidence, localMedia: false, demoMedia: media });
 
 const clips: Clip[] = [
   { id: 'sample-one', title: 'Bình giữ nhiệt 500 ml', sku: 'BINH-500', link: '', published: '2026-11-10',
-    localMedia: false, demoMedia: true, format: 'affiliate', evidence: [segment(5, 'Còn 99k khi áp mã SALE99.', 'frame')] },
+    localMedia: false, demoMedia: true, format: 'affiliate', creator: 'KOC minh họa',
+    stats: { views: 57000, orders: 65 }, evidence: [segment(5, 'Còn 99k khi áp mã SALE99.', 'frame')] },
   demoClip('canvas', 'Review túi canvas đi học', 'TUI-KEM', [
     segment(1, 'Túi canvas màu kem, bên trong có một ngăn lớn.'),
     segment(5, 'Túi canvas giá 129 nghìn.', 'frame'),
@@ -101,7 +108,13 @@ export function sampleWorkspace(): Workspace {
 export function refreshDemo(saved?: Workspace): Workspace {
   if (!saved) return sampleWorkspace();
   if ((saved.demoPack ?? 0) >= pack) return saved;
-  const workspace = prepareWorkspace(saved);
+  const seeded = new Map(clips.map(clip => [clip.id, clip]));
+  const withMetadata = saved.clips.map(clip => {
+    const sample = seeded.get(clip.id);
+    return clip.demoMedia && sample && !clip.stats ? { ...clip, stats: sample.stats, creator: clip.creator ?? sample.creator } : clip;
+  });
+  if ((saved.demoPack ?? 0) >= 2) return { ...saved, demoPack: pack, clips: withMetadata };
+  const workspace = prepareWorkspace({ ...saved, clips: withMetadata });
   const sample = sampleWorkspace();
   const demoClips = new Set(workspace.clips.map(clip => clip.id));
   const known = new Set(workspace.versions.flatMap(version => version.offers.map(offer => offer.sku)));

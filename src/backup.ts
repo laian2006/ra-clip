@@ -16,7 +16,7 @@ const sourceNames = ['audio', 'frame', 'subtitle', 'manual'] as const;
 const kinds = ['code', 'price', 'gift', 'coverage'] as const;
 const statuses = ['action', 'review', 'dated', 'clear'] as const;
 const reviewValues = ['new', 'known', 'wrong', 'done'] as const;
-const triggers = ['manual', 'offers', 'clips', 'evidence', 'baseline'] as const;
+const triggers = ['manual', 'offers', 'clips', 'evidence', 'batch', 'baseline'] as const;
 
 interface FileEntry { id: string; size: number; type: string }
 
@@ -61,6 +61,12 @@ function readMask(value: unknown): EvidenceMask {
   const end = row.end === null ? null : numeric(row.end, 7200);
   if (end !== null && end < start) throw malformed();
   return { start, end, source: oneOf(row.source, ['audio', 'frame'] as const) };
+}
+
+function readScan(value: unknown) {
+  const row = object(value);
+  return { at: date(row.at), detail: string(row.detail, 1600), audio: row.audio === true, frame: row.frame === true,
+    state: oneOf(row.state, ['ready', 'partial', 'empty', 'failed'] as const) };
 }
 
 function readOffer(value: unknown): Offer {
@@ -119,7 +125,19 @@ export async function readBackup(blob: Blob): Promise<{ draft: CampaignDraft; wo
     return replacement;
   }
   function clipBasics(row: Record<string, unknown>): ClipSummary {
-    return { id: newId(row.id), title: string(row.title, 140), sku: string(row.sku, 200), link: safeLink(string(row.link, 4000)) };
+    const metadata = row.stats ? object(row.stats) : undefined;
+    const count = (value: unknown) => {
+      const result = numeric(value, Number.MAX_SAFE_INTEGER);
+      if (!Number.isInteger(result)) throw malformed();
+      return result;
+    };
+    return {
+      id: newId(row.id), title: string(row.title, 140), sku: string(row.sku, 200), link: safeLink(string(row.link, 4000)),
+      videoId: row.videoId ? string(row.videoId, 25) : undefined,
+      creator: row.creator ? string(row.creator, 100) : undefined,
+      stats: metadata ? { views: metadata.views === undefined ? undefined : count(metadata.views),
+        orders: metadata.orders === undefined ? undefined : count(metadata.orders) } : undefined,
+    };
   }
   function findingId(value: unknown) {
     const key = array(JSON.parse(string(value, 15_000)), 16);
@@ -146,6 +164,7 @@ export async function readBackup(blob: Blob): Promise<{ draft: CampaignDraft; wo
       ...clipBasics(row), published: date(row.published, true),
       format: row.format ? oneOf<ClipFormat>(row.format, Object.keys(clipFormats) as ClipFormat[]) : undefined,
       localMedia: row.localMedia === true, mediaRevision: crypto.randomUUID(),
+      lastScan: row.lastScan ? readScan(row.lastScan) : undefined,
       evidence: array(row.evidence, 1500).map(readEvidence),
       masks: array(row.masks ?? [], 2000).map(readMask),
     };

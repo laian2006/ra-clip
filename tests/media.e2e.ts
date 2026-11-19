@@ -58,5 +58,6 @@ test('finds the spoken price with Vietnamese PhoWhisper', async ({ page }) => {
     id: 'audio-test', title: 'Clip thử', sku: 'BINH-500', link: '', published: '',
     localMedia: true, evidence: evidence.filter(row => row.source === 'audio'),
   }, []);
-  expect(claims).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'price', value: 99000 })]));
+  const status = await page.locator('.toast').innerText();
+  expect(claims, status).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'price', value: 99000 })]));
 });

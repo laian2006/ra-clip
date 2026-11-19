@@ -30,8 +30,29 @@ export const clipFormats = {
 } as const;
 export type ClipFormat = keyof typeof clipFormats;
 
+export interface VideoStats {
+  views?: number;
+  orders?: number;
+}
+
+export interface ScanReceipt {
+  at: string;
+  state: 'ready' | 'partial' | 'empty' | 'failed';
+  detail: string;
+  audio: boolean;
+  frame: boolean;
+}
+
+export const scanLabels: Record<ScanReceipt['state'], string> = {
+  ready: 'Có kết quả', partial: 'Có kết quả một phần', empty: 'Chưa đọc được đoạn', failed: 'Quét lỗi',
+};
+
 export interface Clip {
   id: string;
+  videoId?: string;
+  creator?: string;
+  stats?: VideoStats;
+  lastScan?: ScanReceipt;
   title: string;
   sku: string;
   link: string;
@@ -87,9 +108,9 @@ export interface Audit {
   refreshed: string[];
 }
 
-export type AuditTrigger = 'manual' | 'offers' | 'clips' | 'evidence' | 'baseline';
+export type AuditTrigger = 'manual' | 'offers' | 'clips' | 'evidence' | 'batch' | 'baseline';
 
-export type ClipSummary = Pick<Clip, 'id' | 'title' | 'sku' | 'link'>;
+export type ClipSummary = Pick<Clip, 'id' | 'title' | 'sku' | 'link' | 'videoId' | 'creator' | 'stats'>;
 
 export interface AuditSnapshot {
   id: string;

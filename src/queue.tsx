@@ -1,13 +1,15 @@
 import { ArrowDownToLine, ArrowUpRight, Check, ClipboardList, Search, StickyNote } from 'lucide-react';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { fold } from './claims';
 import { kindLabels, reviewLabels, timestamp } from './domain';
 import type { Clip, Finding, Review, Workspace } from './domain';
 import { auditCsv, download } from './files';
-import { Modal, Tag } from './ui';
+import { Modal, TableRegion, Tag } from './ui';
+import { numberLabel } from './catalog';
 import { queueEntries, reviewOpen } from './workflow';
 
 type QueueFilter = 'open' | 'done' | 'wrong' | 'all';
+type QueueSort = 'severity' | 'orders' | 'views';
 const filters: { value: QueueFilter; label: string }[] = [
   { value: 'open', label: 'Cần làm' }, { value: 'done', label: 'Đã xử lý' },
   { value: 'wrong', label: 'Báo nhầm' }, { value: 'all', label: 'Tất cả' },
@@ -22,17 +24,26 @@ export function QueueView({ workspace, busy, onReview, onNote, onOpen }: {
   const entries = useMemo(() => queueEntries(workspace), [workspace]);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<QueueFilter>('open');
+  const [sort, setSort] = useState<QueueSort>('severity');
   const [selection, setSelection] = useState<Set<string>>(() => new Set());
   const [noteFor, setNoteFor] = useState<string>();
   const [draft, setDraft] = useState('');
   const [noteError, setNoteError] = useState('');
   const [savingNote, setSavingNote] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const filtersRef = useRef<HTMLDivElement>(null);
   const q = fold(query.trim());
   const state = (review: Review | undefined): QueueFilter => reviewOpen(review) ? 'open' : review === 'done' ? 'done' : 'wrong';
   const rows = entries.filter(({ clip, finding, note, review }) =>
     (filter === 'all' || state(review) === filter) &&
-    fold(`${clip.title} ${clip.sku} ${finding.claim} ${finding.reason} ${note}`).includes(q));
+    fold(`${clip.title} ${clip.sku} ${clip.creator ?? ''} ${finding.claim} ${finding.reason} ${note}`).includes(q))
+    .sort((a, b) => {
+      if (sort !== 'severity') {
+        const order = (b.clip.stats?.[sort] ?? -1) - (a.clip.stats?.[sort] ?? -1);
+        if (order) return order;
+      }
+      return Number(b.finding.verdict === 'action') - Number(a.finding.verdict === 'action');
+    });
   const selected = rows.filter(row => selection.has(row.finding.id));
   const selectedIds = selected.map(row => row.finding.id);
   const noteRow = entries.find(item => item.finding.id === noteFor);
@@ -49,9 +60,17 @@ export function QueueView({ workspace, busy, onReview, onNote, onOpen }: {
   }
 
   async function change(ids: string[], review: Review | '') {
+    const opener = document.activeElement;
     setUpdating(true);
     try {
-      if (await onReview(ids, review)) setSelection(new Set());
+      if (await onReview(ids, review)) {
+        setSelection(new Set());
+        requestAnimationFrame(() => {
+          if (!opener?.isConnected || document.activeElement === document.body) {
+            filtersRef.current?.querySelector<HTMLElement>('[aria-pressed="true"]')?.focus({ preventScroll: true });
+          }
+        });
+      }
     } finally { setUpdating(false); }
   }
 
@@ -79,21 +98,26 @@ export function QueueView({ workspace, busy, onReview, onNote, onOpen }: {
       <button className="button secondary" type="button" disabled={!rows.length} onClick={exportRows}><ArrowDownToLine size={16} /> Xuất danh sách</button>
     </div>
     <div className="ops-toolbar">
-      <div className="segmented" aria-label="Lọc theo tiến độ">
+      <div className="segmented" ref={filtersRef} role="group" aria-label="Lọc theo tiến độ">
         {filters.map(option => <button type="button" aria-pressed={filter === option.value} className={filter === option.value ? 'active' : ''}
           key={option.value} onClick={() => setFilter(option.value)}>
           {option.label}<span>{option.value === 'all' ? entries.length : entries.filter(row => state(row.review) === option.value).length}</span>
         </button>)}
       </div>
-      <label className="search-box"><Search size={16} /><input aria-label="Tìm việc" placeholder="Tìm theo video, SKU, mã…"
-        value={query} onChange={event => setQuery(event.target.value)} /></label>
+      <div className="queue-controls">
+        <label className="search-box"><Search size={16} /><input aria-label="Tìm việc" placeholder="Video, SKU, nhà sáng tạo…"
+          value={query} onChange={event => setQuery(event.target.value)} /></label>
+        <label className="sort-control"><span>Sắp xếp</span><select value={sort} onChange={event => setSort(event.target.value as QueueSort)}>
+          <option value="severity">Mức cần xử lý</option><option value="orders">Nhiều đơn đã nhập</option><option value="views">Nhiều lượt xem đã nhập</option>
+        </select></label>
+      </div>
     </div>
     {selected.length > 0 && <div className="bulk-actions">
       <strong>Đã chọn {selected.length} việc</strong>
       <button type="button" className="button secondary" disabled={busy || updating} onClick={() => void change(selectedIds, 'wrong')}>Báo nhầm</button>
       <button type="button" className="button primary" disabled={busy || updating} onClick={() => void change(selectedIds, 'done')}><Check size={16} /> Đánh dấu đã xử lý</button>
     </div>}
-    {rows.length ? <div className="table-wrap"><table className="queue-table">
+    {rows.length ? <TableRegion label="Bảng danh sách việc. Có thể cuộn ngang nếu cần."><table className="queue-table">
       <thead><tr><th><input type="checkbox" aria-label="Chọn tất cả việc đang hiển thị" checked={selected.length === rows.length}
         disabled={busy || updating} onChange={event => setSelection(event.target.checked ? new Set(rows.map(row => row.finding.id)) : new Set())} /></th>
         <th scope="col">Video và dấu hiệu</th><th scope="col">Kết quả</th><th scope="col">Tiến độ</th><th scope="col">Ghi chú</th></tr></thead>
@@ -104,6 +128,10 @@ export function QueueView({ workspace, busy, onReview, onNote, onOpen }: {
         <td className="queue-title">
           <button type="button" className="queue-link" onClick={() => onOpen(clip, finding)}>{clip.title}<ArrowUpRight size={14} /></button>
           <small>{clip.sku || 'Chưa gán SKU'} · {kindLabels[finding.kind]}{finding.evidence ? ' · ' + timestamp(finding.evidence.start) : ''}</small>
+          {(clip.creator || clip.stats) && <small className="queue-stats">{[
+            clip.creator, clip.stats?.orders === undefined ? '' : numberLabel(clip.stats.orders) + ' đơn',
+            clip.stats?.views === undefined ? '' : numberLabel(clip.stats.views) + ' lượt xem',
+          ].filter(Boolean).join(' · ')}</small>}
           <p>{finding.reason}</p>
         </td>
         <td><Tag verdict={finding.verdict} /><small>{finding.claim}</small></td>
@@ -116,7 +144,7 @@ export function QueueView({ workspace, busy, onReview, onNote, onOpen }: {
           setNoteFor(finding.id); setDraft(note); setNoteError('');
         }}><StickyNote size={15} /><span>{note || 'Thêm ghi chú'}</span></button></td>
       </tr>)}</tbody>
-    </table></div> : <div className="empty ops-empty"><ClipboardList size={30} /><strong>Chưa có việc trong bộ lọc này</strong>
+    </table></TableRegion> : <div className="empty ops-empty"><ClipboardList size={30} /><strong>Chưa có việc trong bộ lọc này</strong>
       <p>{entries.length ? 'Đổi bộ lọc hoặc từ khóa để tìm việc.' : 'Kết quả cần xử lý hoặc xác nhận sẽ xuất hiện sau khi rà.'}</p></div>}
     {noteRow && <Modal title="Ghi chú xử lý" detail={noteRow.clip.title} busy={savingNote} onClose={() => setNoteFor(undefined)}>
       <form className="dialog-form" onSubmit={saveNote}>

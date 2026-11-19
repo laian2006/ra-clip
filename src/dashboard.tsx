@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDownToLine, ArrowUpRight, CalendarClock, ChevronRight, CirclePlay, FileVideo,
-  Film, Link2, ListChecks, Pencil, ScanLine, Search, Trash2,
+  Captions, Film, Link2, ListChecks, Pencil, ScanLine, Search, Trash2,
 } from 'lucide-react';
 import { fold } from './claims';
 import { clipFormats, kindLabels, reviewLabels, sourceLabels, timestamp, verdictLabels } from './domain';
@@ -9,6 +9,9 @@ import type { Clip, ClipFormat, ClipResult, Finding, Review, Verdict } from './d
 import { loadMedia } from './storage';
 import { demoAsset } from './demo';
 import { EvidenceTimeline } from './evidence';
+import { captionsFor } from './captions';
+import { lastScanLabel } from './batch';
+import { numberLabel } from './catalog';
 import { leadVerdict, verdicts } from './workflow';
 import { ClipGlyph, Empty, FindingReason, Tag, verdictIcons } from './ui';
 
@@ -35,22 +38,29 @@ export function ClipList({ clips, results, filter, selected, onSelect, onAdd, li
 }) {
   const [query, setQuery] = useState('');
   const [format, setFormat] = useState<ClipFormat | 'all' | 'unset'>('all');
+  const [readiness, setReadiness] = useState<'all' | 'sku' | 'evidence' | 'file'>('all');
   const search = fold(query.trim());
   const entries = clips.filter(clip => {
-    if (search && !fold(`${clip.title} ${clip.sku} ${clip.format ? clipFormats[clip.format] : ''}`).includes(search)) return false;
+    if (search && !fold(`${clip.title} ${clip.sku} ${clip.creator ?? ''} ${clip.format ? clipFormats[clip.format] : ''}`).includes(search)) return false;
+    if (library && ((readiness === 'sku' && clip.sku) || (readiness === 'evidence' && clip.evidence.length)
+      || (readiness === 'file' && (clip.localMedia || clip.demoMedia)))) return false;
     if (library && format !== 'all' && (clip.format ?? 'unset') !== format) return false;
     return library || filter === 'all' || leadVerdict(results.get(clip.id)?.findings ?? []) === filter;
   });
   return <section className="panel list-panel">
     <div className="panel-heading">
       <div><h2>{library ? 'Kho video' : 'Kết quả rà soát'}</h2>
-        <p>{entries.length === clips.length ? `${clips.length} video` : `${entries.length} / ${clips.length} video`}</p>
+        <p role="status" aria-atomic="true">{entries.length === clips.length ? `${clips.length} video` : `${entries.length} / ${clips.length} video`}</p>
       </div>
       <div className="list-tools">
         {library && <select aria-label="Lọc kiểu video" value={format} onChange={event => setFormat(event.target.value as typeof format)}>
           <option value="all">Mọi kiểu video</option>
           {Object.entries(clipFormats).map(([key, value]) => <option value={key} key={key}>{value}</option>)}
           <option value="unset">Chưa chọn kiểu</option>
+        </select>}
+        {library && <select aria-label="Lọc theo dữ liệu chuẩn bị" value={readiness} onChange={event => setReadiness(event.target.value as typeof readiness)}>
+          <option value="all">Mọi trạng thái dữ liệu</option><option value="sku">Chưa gán SKU</option>
+          <option value="evidence">Chưa có bằng chứng</option><option value="file">Chưa có file video</option>
         </select>}
         <label className="search-box"><Search size={17} /><input aria-label="Tìm video" placeholder="Tìm video…" value={query}
           onChange={event => setQuery(event.target.value)} /></label>
@@ -65,7 +75,8 @@ export function ClipList({ clips, results, filter, selected, onSelect, onAdd, li
         return <button type="button" className={`clip-row ${selected === clip.id ? 'selected' : ''}`} key={clip.id}
           aria-pressed={selected === clip.id} onClick={() => onSelect(clip.id)}>
           <span className="row-main"><ClipGlyph clip={clip} /><span className="row-title">
-            <strong>{clip.title}</strong><small>{clip.sku || 'Chưa gán SKU'}{clip.format ? ' · ' + clipFormats[clip.format] : ''}</small></span></span>
+            <strong>{clip.title}</strong><small>{clip.sku || 'Chưa gán SKU'}{clip.format ? ' · ' + clipFormats[clip.format] : ''}</small>
+            {library && (clip.creator || clip.lastScan) && <small>{[clip.creator, clip.lastScan && lastScanLabel(clip)].filter(Boolean).join(' · ')}</small>}</span></span>
           <span className="row-status">{ready && verdict ? <Tag verdict={verdict} /> : <span className="unscanned">Chờ rà</span>}
             {hits > 1 && <small className="hits">{hits} dấu hiệu</small>}
           </span>
@@ -82,9 +93,40 @@ export function ClipList({ clips, results, filter, selected, onSelect, onAdd, li
 function ClipPlayer({ clip, jump }: { clip: Clip; jump: { time: number; tick: number } | null }) {
   const [url, setUrl] = useState('');
   const [failed, setFailed] = useState(false);
+  const [captionFile, setCaptionFile] = useState('');
+  const [captions, setCaptions] = useState(() => {
+    try { return localStorage.getItem('ra-clip-captions') === 'on'; }
+    catch { return false; }
+  });
   const ref = useRef<HTMLVideoElement>(null);
   const jumpTime = jump?.time;
   const fixture = demoAsset(clip);
+  const transcript = useMemo(() => fixture ? '' : captionsFor(clip.evidence), [fixture, clip.evidence]);
+  const trackUrl = fixture ? `${fixture}.vtt` : captionFile;
+
+  useEffect(() => {
+    if (!transcript) { setCaptionFile(''); return; }
+    const track = URL.createObjectURL(new Blob([transcript], { type: 'text/vtt;charset=utf-8' }));
+    setCaptionFile(track);
+    return () => URL.revokeObjectURL(track);
+  }, [transcript]);
+
+  useEffect(() => {
+    try { localStorage.setItem('ra-clip-captions', captions ? 'on' : 'off'); } catch { /* The current player remains usable. */ }
+  }, [captions]);
+
+  useEffect(() => {
+    const track = ref.current?.textTracks[0];
+    if (track) track.mode = captions ? 'showing' : 'hidden';
+  }, [captions, trackUrl, url]);
+
+  useEffect(() => {
+    const tracks = ref.current?.textTracks;
+    if (!tracks) return;
+    const sync = () => { setCaptions(tracks[0]?.mode === 'showing'); };
+    tracks.addEventListener('change', sync);
+    return () => tracks.removeEventListener('change', sync);
+  }, [trackUrl, url]);
 
   useEffect(() => {
     let objectUrl = '';
@@ -112,16 +154,20 @@ function ClipPlayer({ clip, jump }: { clip: Clip; jump: { time: number; tick: nu
     if (ref.current) seek(ref.current);
   }, [jump?.tick]);
 
-  return <div className="player">
+  return <div className="player-wrap"><div className="player">
     {url && !failed ? <video key={url} ref={ref} src={url} controls playsInline preload="metadata"
       poster={fixture ? `${fixture}.webp` : undefined}
       onError={() => setFailed(true)} onLoadedMetadata={event => seek(event.currentTarget)} aria-label={`Phát ${clip.title}`}>
-        {fixture && <track kind="captions" label="Tiếng Việt" srcLang="vi" src={`${fixture}.vtt`} />}
+        {trackUrl && <track key={trackUrl} kind="captions" label={fixture ? 'Tiếng Việt' : 'Tiếng Việt · đoạn trích'}
+          srcLang="vi" src={trackUrl} onLoad={event => { event.currentTarget.track.mode = captions ? 'showing' : 'hidden'; }} />}
       </video>
       : <div className="player-placeholder"><Film size={26} /><span>{failed ? 'Video không mở được' :
         (clip.localMedia || clip.demoMedia) ? 'Đang mở video…' : 'Clip chưa có file phát'}</span>
         {clip.link && <a href={clip.link} target="_blank" rel="noopener noreferrer"><Link2 size={14} /> Mở bài đăng</a>}
       </div>}
+  </div>
+    {url && trackUrl && !failed && <button type="button" className="button secondary caption-toggle" aria-pressed={captions}
+      onClick={() => setCaptions(value => !value)}><Captions size={17} /> Phụ đề</button>}
   </div>;
 }
 
@@ -156,7 +202,7 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
     if (row.evidence) jumpTo(row.evidence.start);
   }
 
-  return <section className="panel detail-panel" id="clip-evidence">
+  return <section className="panel detail-panel" id="clip-evidence" tabIndex={-1} aria-label="Bằng chứng video">
     <div className="panel-heading detail-header">
       <div><h2>Bằng chứng</h2><p title={clip.title}>{clip.title}</p></div>
       <div className="mini-actions">
@@ -170,7 +216,7 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
     <div className="detail-content">
       <ClipPlayer clip={clip} jump={jump} />
       {playable && <button className="text-button scan-video" type="button" onClick={() => onScan(clip)} disabled={busy}><ScanLine size={15} /> Phân tích video bằng AI</button>}
-      <div className="segmented evidence-tabs" aria-label="Xem bằng chứng">
+      <div className="segmented evidence-tabs" role="group" aria-label="Xem bằng chứng">
         <button type="button" className={tab === 'results' ? 'active' : ''} aria-pressed={tab === 'results'} onClick={() => setTab('results')}>Phát hiện</button>
         <button type="button" className={tab === 'segments' ? 'active' : ''} aria-pressed={tab === 'segments'} onClick={() => setTab('segments')}>Đoạn trích<span>{clip.evidence.length}</span></button>
       </div>
@@ -200,6 +246,10 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
             onClick={() => select(row)}><FindingReason row={row} /></button>)}
         </div>}
       </> : <div className="no-evidence"><FileVideo size={19} /> Chạy rà soát để đối chiếu bằng chứng với bảng ưu đãi.</div>}
+      {(clip.creator || clip.stats) && <div className="clip-stats"><strong>Số liệu đã nhập</strong>
+        {[clip.creator, clip.stats?.views === undefined ? '' : numberLabel(clip.stats.views) + ' lượt xem',
+          clip.stats?.orders === undefined ? '' : numberLabel(clip.stats.orders) + ' đơn'].filter(Boolean).join(' · ')}</div>}
+      {clip.lastScan && <div className="clip-scan-summary"><strong>{lastScanLabel(clip)}</strong><span>{clip.lastScan.detail}</span></div>}
       <div className="clip-meta">
         <span>{clip.sku ? `SKU · ${clip.sku}` : 'Chưa gán SKU'}</span>
         <span><CalendarClock size={14} /> {clip.evidence.length} đoạn đã ghi nhận</span>
