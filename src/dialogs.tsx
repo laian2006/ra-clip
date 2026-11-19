@@ -1,11 +1,12 @@
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ArrowUpFromLine, CircleAlert, CirclePlus, FileText, LoaderCircle, Trash2 } from 'lucide-react';
 import { clipFormats, normalizeCode, safeLink } from './domain';
 import type { Clip, ClipFormat, Evidence, Offer, VideoStats } from './domain';
 import { readCount } from './catalog';
 import { readPrice, readSubtitles } from './files';
 import { validateOffers } from './audit';
-import { type ScanOptions, validateVideo } from './media';
+import { prepareSpeech, speechIsReady, type ScanOptions, validateVideo } from './media';
+import { DuplicateVideo, type DuplicateChoice } from './duplicates';
 import { Modal } from './ui';
 
 export interface DraftClip {
@@ -13,10 +14,11 @@ export interface DraftClip {
   creator?: string; stats?: VideoStats; evidence: Evidence[]; file: File | null;
 }
 
-export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
+export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel, onOpen }: {
   clip?: Clip;
   skus: string[];
-  onSave: (drafts: DraftClip[], scan: ScanOptions) => Promise<void>;
+  onSave: (drafts: DraftClip[], scan: ScanOptions, choice: DuplicateChoice) => Promise<void>;
+  onOpen: (clip: Clip) => void;
   onClose: () => void;
   busy: string;
   onCancel: () => void;
@@ -37,9 +39,37 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
   const [audio, setAudio] = useState(true);
   const [frame, setFrame] = useState(true);
   const [error, setError] = useState('');
+  const [conflict, setConflict] = useState<{ match: DuplicateVideo; choice: DuplicateChoice }>();
+  const [modelStatus, setModelStatus] = useState(speechIsReady() ? 'Mô hình đã sẵn sàng.' : 'Mô hình chưa mở trong tab này.');
+  const [loadingModel, setLoadingModel] = useState(false);
+  const [modelFailed, setModelFailed] = useState(false);
+  const modelTask = useRef<AbortController | null>(null);
+  const duplicateAction = useRef<HTMLButtonElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const subtitleInput = useRef<HTMLTextAreaElement>(null);
   const many = files.length > 1;
+  const working = busy || (loadingModel ? 'Đang chuẩn bị mô hình lời thoại…' : '');
+  useEffect(() => () => modelTask.current?.abort(), []);
+  useEffect(() => { if (conflict && !busy) duplicateAction.current?.focus(); }, [conflict, busy]);
+
+  async function warmModel() {
+    if (loadingModel || modelTask.current) return;
+    const controller = new AbortController();
+    modelTask.current = controller;
+    setLoadingModel(true);
+    setModelFailed(false);
+    setModelStatus('Đang mở mô hình lời thoại…');
+    try {
+      await prepareSpeech(setModelStatus, controller.signal);
+      setModelStatus('Mô hình đã sẵn sàng.');
+    } catch (error) {
+      setModelFailed(!controller.signal.aborted);
+      setModelStatus(controller.signal.aborted ? 'Đã dừng mở mô hình.' : error instanceof Error ? error.message : 'Chưa mở được mô hình lời thoại.');
+    } finally {
+      modelTask.current = null;
+      setLoadingModel(false);
+    }
+  }
 
   function pick(selected: File[]) {
     try {
@@ -48,6 +78,7 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
       }
       selected.forEach(validateVideo);
       setFiles(selected);
+      setConflict(undefined);
       if (selected.length > 1 && files.length <= 1) {
         setAudio(false);
         setFrame(false);
@@ -59,8 +90,9 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
     }
   }
 
-  async function submit(event: FormEvent) {
-    event.preventDefault();
+  async function submit(choice: DuplicateChoice) {
+    if (working) return;
+    setConflict(undefined);
     setError('');
     try {
       const url = link.trim() ? safeLink(link.trim()) : '';
@@ -85,14 +117,16 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
       }));
       if (drafts.some(item => !item.title)) throw Error('Nhập tên video.');
       if (drafts.some(item => item.title.length > 140)) throw Error('Tên video tối đa 140 ký tự.');
-      await onSave(drafts, { audio: files.length > 0 && audio, frame: files.length > 0 && frame });
+      await onSave(drafts, { audio: files.length > 0 && audio, frame: files.length > 0 && frame }, choice);
     } catch (failure) {
+      if (failure instanceof DuplicateVideo) { setConflict({ match: failure, choice }); return; }
       setError(failure instanceof Error ? failure.message : 'Chưa lưu được video.');
     }
   }
 
-  return <Modal title={clip ? 'Sửa video' : 'Thêm video'} detail="Chọn file video hoặc nhập phụ đề có mốc thời gian để đối chiếu." busy={!!busy} onClose={onClose}>
-    <form className="dialog-form" onSubmit={submit}>
+  return <Modal title={clip ? 'Sửa video' : 'Thêm video'} detail="Chọn file video hoặc nhập phụ đề có mốc thời gian để đối chiếu." busy={!!working} onClose={onClose}>
+    <form className="dialog-form" onSubmit={event => { event.preventDefault(); if (!conflict) void submit({ separate: new Set() }); }}>
+      <fieldset className="clip-fields" disabled={!!working || Boolean(conflict)}>
       <input ref={input} type="file" className="sr-only" tabIndex={-1}
         accept=".mp4,.webm,.mov,.m4v,video/mp4,video/webm,video/quicktime" multiple={!clip}
         onChange={event => { pick(Array.from(event.target.files ?? [])); event.target.value = ''; }} />
@@ -137,6 +171,12 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
         <label><input type="checkbox" checked={audio} onChange={event => setAudio(event.target.checked)} disabled={!!busy} /> Lời thoại</label>
         <label><input type="checkbox" checked={frame} onChange={event => setFrame(event.target.checked)} disabled={!!busy} /> Chữ trên khung hình</label>
         <small>{many ? 'Có thể lưu file trước rồi quét hàng loạt trong Kho video.' : 'Lần đầu trình duyệt tải mô hình. Video được xử lý tại chỗ.'}</small>
+        {audio && <div className="speech-setup">
+          <p role={modelFailed ? 'alert' : 'status'}>{modelStatus}</p>
+          <small>Lần đầu có thể tải khoảng 80 MB.</small>
+          {!speechIsReady() && <button type="button" className="text-button" disabled={!!working}
+            onClick={() => void warmModel()}>{modelFailed ? 'Thử tải lại mô hình' : 'Chuẩn bị mô hình lời thoại'}</button>}
+        </div>}
       </fieldset>}
       {!many && <div className="subtitle-label">
         <div><label htmlFor="clip-subtitles">Phụ đề hoặc ghi chú</label>
@@ -157,11 +197,26 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel }: {
         <small id="subtitle-hint">{subtitleFile || (clip ? 'Nội dung mới sẽ thay phụ đề và ghi chú đã nhập.' : 'Mỗi dòng bắt đầu bằng phút:giây.')}</small>
         {subtitleError && <p id="subtitle-error" className="form-error" role="alert">{subtitleError}</p>}
       </div>}
+      </fieldset>
+      {conflict && <section className="duplicate-warning" aria-label="Video có thể bị trùng">
+        <p role="alert">{conflict.match.message} Chọn cách xử lý trước khi lưu.</p>
+        <div className="start-actions">
+          {conflict.match.existing && <button ref={duplicateAction} type="button" className="button primary"
+            onClick={() => onOpen(conflict.match.existing!)}>Mở bản cũ</button>}
+          {!clip && !many && files.length === 1 && conflict.match.existing && <button className="button secondary" type="button"
+            onClick={() => void submit({ ...conflict.choice, replace: conflict.match.existing })}>Thay file bản cũ</button>}
+          <button className="button secondary" type="button" onClick={() => setConflict(undefined)}>Sửa lựa chọn</button>
+          <button ref={conflict.match.existing ? undefined : duplicateAction} className="text-button" type="button"
+            onClick={() => void submit({ ...conflict.choice, separate: new Set([...conflict.choice.separate, conflict.match.index]) })}>
+            {clip ? 'Vẫn lưu bản này' : 'Vẫn thêm bản mới'}</button>
+        </div>
+      </section>}
       {error && <p className="form-error" role="alert"><CircleAlert size={16} /> {error}</p>}
       {busy && <p className="progress-message" role="status"><LoaderCircle size={16} className="spin" /> {busy}</p>}
       <div className="dialog-actions">
-        <button type="button" className="button secondary" onClick={busy ? onCancel : onClose}>{busy ? 'Dừng phân tích' : 'Hủy'}</button>
-        <button type="submit" className="button primary" disabled={!!busy}>{clip ? 'Lưu video' : 'Thêm vào kho'}</button>
+        <button type="button" className="button secondary" onClick={loadingModel ? () => modelTask.current?.abort() : busy ? onCancel : onClose}>
+          {loadingModel ? 'Dừng tải mô hình' : busy ? 'Dừng phân tích' : 'Hủy'}</button>
+        <button type="submit" className="button primary" disabled={!!working || Boolean(conflict)}>{clip ? 'Lưu video' : 'Thêm vào kho'}</button>
       </div>
     </form>
   </Modal>;

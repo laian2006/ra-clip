@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { Workspace } from '../src/domain';
 import { extractClaims } from '../src/claims';
+import { sampleWorkspace } from '../src/demo';
 
 async function mediaEvidence(page: Page) {
   return page.evaluate(async () => {
@@ -50,14 +51,23 @@ test('reads the real on-screen voucher from a video without external requests', 
   expect(external).toEqual([]);
 });
 
-test('finds the spoken price with Vietnamese PhoWhisper', async ({ page }) => {
+test('finds the spoken price and makes an unclear voucher correctable', async ({ page }) => {
   test.skip(process.env.RA_CLIP_TEST_MODELS !== '1', 'Opt in to the first-use model download.');
   test.setTimeout(150_000);
   const evidence = await importFixture(page, true, false);
   const claims = extractClaims({
     id: 'audio-test', title: 'Clip thử', sku: 'BINH-500', link: '', published: '',
     localMedia: true, evidence: evidence.filter(row => row.source === 'audio'),
-  }, []);
+  }, sampleWorkspace().versions.at(-1)!.offers.filter(row => row.sku === 'BINH-500'));
   const status = await page.locator('.toast').innerText();
-  expect(claims, status).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'price', value: 99000 })]));
+  expect(claims, `${status}\n${JSON.stringify(evidence)}`).toEqual(expect.arrayContaining([
+    expect.objectContaining({ kind: 'price', value: 99000, evidence: expect.objectContaining({ start: expect.any(Number), source: 'audio' }) }),
+  ]));
+  const warning = page.getByRole('button', { name: 'Sửa đoạn lời thoại', exact: true });
+  await expect(warning).toBeVisible();
+  await warning.click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('textbox', { name: 'Nội dung đoạn trích' }).fill('Còn chín mươi chín nghìn khi áp mã SALE99.');
+  await dialog.getByRole('button', { name: 'Lưu đoạn trích' }).click();
+  await expect(page.locator('.evidence-card .tag')).toHaveText('Cần xử lý');
 });

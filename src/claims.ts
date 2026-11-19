@@ -102,6 +102,17 @@ function readCodes(text: string, offers: Offer[]) {
   return [...new Set([...explicit, ...known].filter(code => /[A-Z]/.test(code)))];
 }
 
+export function unclearSpokenVoucher(clip: Clip, offers: Offer[]) {
+  const mentioned = /\b(?:(?:ap|nhap|dung)\s+ma|ma\s+(?:giam gia|uu dai)|voucher)\b/;
+  const negated = /\b(?:khong|chang)\s+(?:can\s+)?(?:ap|nhap|dung)\s+ma\b/;
+  return clip.evidence.find(segment => {
+    if (segment.source !== 'audio') return false;
+    const text = fold(segment.text);
+    if (!mentioned.test(text) || negated.test(text)) return false;
+    return !clip.evidence.some(row => Math.abs(row.start - segment.start) <= 4 && readCodes(row.text, offers).length > 0);
+  });
+}
+
 export function extractClaims(clip: Clip, offers: Offer[]) {
   const claims: Claim[] = [];
   const seen = new Set<string>();

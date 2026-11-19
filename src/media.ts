@@ -1,4 +1,4 @@
-import type { Evidence } from './domain';
+import type { Evidence, MediaSource, ScanSource } from './domain';
 
 const MAX_BYTES = 150 * 1024 * 1024;
 const MAX_DURATION = 120;
@@ -59,31 +59,58 @@ export async function videoMetadata(blob: Blob, signal = new AbortController().s
 }
 
 let speechWorker: Worker | undefined;
+let speechReady = false;
+export const speechIsReady = () => speechReady;
 
-function transcribe(samples: Float32Array, progress: (message: string) => void, signal: AbortSignal) {
+function speechTask(input: Float32Array | 'prepare', progress: (message: string) => void, signal: AbortSignal) {
   signal.throwIfAborted();
   return new Promise<Evidence[]>((resolve, reject) => {
-    speechWorker ??= new Worker(new URL('./speech.worker.ts', import.meta.url), { type: 'module' });
+    try { speechWorker ??= new Worker(new URL('./speech.worker.ts', import.meta.url), { type: 'module' }); }
+    catch (error) {
+      console.debug('Không mở được bộ xử lý lời thoại:', error);
+      reject(Error('Trình duyệt không mở được bộ xử lý lời thoại. Thử lại hoặc dùng phụ đề SRT/VTT.'));
+      return;
+    }
     const worker = speechWorker;
+    let timer: number;
     const clean = () => {
+      window.clearTimeout(timer);
       worker.removeEventListener('message', message);
       worker.removeEventListener('error', fail);
       signal.removeEventListener('abort', cancel);
     };
     const message = (event: MessageEvent<{ kind: string; message?: string; evidence?: Evidence[] }>) => {
-      if (event.data.kind === 'progress') { progress(event.data.message ?? ''); return; }
+      if (event.data.kind === 'progress') {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(timeout, 180_000);
+        progress(event.data.message ?? '');
+        return;
+      }
       clean();
-      if (event.data.kind === 'success') resolve(event.data.evidence ?? []);
+      if (event.data.kind === 'success') {
+        speechReady = true;
+        resolve(event.data.evidence ?? []);
+      }
       else reject(Error(event.data.message || 'Lỗi nhận dạng lời thoại.'));
     };
-    const reset = () => { worker.terminate(); if (speechWorker === worker) speechWorker = undefined; };
-    const fail = (event: ErrorEvent) => { clean(); reset(); reject(Error(event.message || 'Mô hình giọng nói không phản hồi.')); };
+    const reset = () => { worker.terminate(); if (speechWorker === worker) { speechWorker = undefined; speechReady = false; } };
+    const timeout = () => { clean(); reset(); reject(Error('Lời thoại xử lý quá lâu. Thử lại hoặc dùng phụ đề SRT/VTT.')); };
+    const fail = (event: ErrorEvent) => {
+      console.debug('Tiến trình PhoWhisper:', event.message);
+      clean(); reset(); reject(Error('Mô hình lời thoại không phản hồi. Thử lại hoặc dùng phụ đề SRT/VTT.'));
+    };
     const cancel = () => { clean(); reset(); reject(signal.reason); };
     worker.addEventListener('message', message);
     worker.addEventListener('error', fail);
     signal.addEventListener('abort', cancel, { once: true });
-    worker.postMessage(samples, [samples.buffer]);
+    timer = window.setTimeout(timeout, 90_000);
+    if (input === 'prepare') worker.postMessage(input);
+    else worker.postMessage(input, [input.buffer]);
   });
+}
+
+export async function prepareSpeech(progress: (message: string) => void, signal: AbortSignal) {
+  await speechTask('prepare', progress, signal);
 }
 
 async function audioSamples(blob: Blob) {
@@ -159,8 +186,10 @@ async function readFrames(video: HTMLVideoElement, progress: (message: string) =
     import('tesseract.js-core/tesseract-core-lstm.wasm.js?url'),
   ]);
   signal.throwIfAborted();
+  const script = new URL('ocr/worker.js', document.baseURI);
+  script.searchParams.set('script', new URL(workerAsset.default, document.baseURI).href);
   const initialization = createWorker(['vie', 'eng'], 1, {
-    workerPath: new URL(workerAsset.default, document.baseURI).href,
+    workerPath: script.href,
     corePath: new URL(coreAsset.default, document.baseURI).href,
     langPath: new URL('ocr/', document.baseURI).href,
     workerBlobURL: false,
@@ -230,22 +259,26 @@ export interface ScanOptions { audio: boolean; frame: boolean }
 export async function analyzeVideo(blob: Blob, options: ScanOptions, progress: (message: string) => void, signal: AbortSignal) {
   const { video, release } = await videoMetadata(blob, signal);
   const evidence: Evidence[] = [];
-  const notes: string[] = [];
+  const sources: Partial<Record<MediaSource, ScanSource>> = {};
   try {
     if (options.audio) {
       try {
         progress('Đang đọc âm thanh…');
-        const samples = await audioSamples(blob);
+        const samples = await audioSamples(blob).catch(error => {
+          console.debug('Không giải mã được âm thanh:', error);
+          throw Error('Trình duyệt không đọc được âm thanh. Kiểm tra video có tiếng hoặc dùng phụ đề SRT/VTT.');
+        });
         signal.throwIfAborted();
-        if (!samples.some(value => Math.abs(value) > 0.005)) notes.push('Âm thanh quá nhỏ để nhận dạng.');
+        if (!samples.some(value => Math.abs(value) > 0.005)) sources.audio = { state: 'empty', detail: 'Âm thanh quá nhỏ để nhận dạng.' };
         else {
-          const speech = await transcribe(samples, progress, signal);
+          const speech = await speechTask(samples, progress, signal);
           evidence.push(...speech);
-          if (!speech.length) notes.push('Chưa nhận ra lời thoại.');
+          sources.audio = speech.length ? { state: 'done', detail: `Đã nhận dạng ${speech.length} đoạn.` }
+            : { state: 'empty', detail: 'Chưa nhận ra lời thoại.' };
         }
       } catch (error) {
         signal.throwIfAborted();
-        notes.push(`Lời thoại: ${error instanceof Error ? error.message : 'không đọc được âm thanh'}`);
+        sources.audio = { state: 'failed', detail: error instanceof Error ? error.message : 'Chưa đọc được lời thoại. Thử lại hoặc dùng phụ đề SRT/VTT.' };
       }
     }
     if (options.frame) {
@@ -253,13 +286,15 @@ export async function analyzeVideo(blob: Blob, options: ScanOptions, progress: (
         progress('Đang chuẩn bị mô hình đọc chữ…');
         const frames = await readFrames(video, progress, signal);
         evidence.push(...frames);
-        if (!frames.length) notes.push('Chưa nhận ra chữ trên các khung hình đã lấy mẫu.');
+        sources.frame = frames.length ? { state: 'done', detail: `Đã đọc chữ tại ${frames.length} mốc.` }
+          : { state: 'empty', detail: 'Chưa đọc được chữ trên các khung hình đã quét.' };
       } catch (error) {
         signal.throwIfAborted();
-        notes.push(`Chữ trên video: ${error instanceof Error ? error.message : 'không đọc được khung hình'}`);
+        console.debug('Tesseract:', error);
+        sources.frame = { state: 'failed', detail: 'Chưa quét xong khung hình. Thử lại hoặc dùng phụ đề SRT/VTT.' };
       }
     }
-    return { evidence: evidence.sort((a, b) => a.start - b.start), notes };
+    return { evidence: evidence.sort((a, b) => a.start - b.start), sources };
   } finally {
     release();
   }

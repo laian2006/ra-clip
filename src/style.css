@@ -18,6 +18,21 @@
 }
 
 @layer app {
+  .clip-fields { display: grid; gap: 13px; border: 0; min-width: 0; margin: 0; padding: 0; }
+  .speech-setup { flex-basis: 100%; display: grid; gap: 4px; justify-items: start; }
+  .duplicate-warning { display: grid; gap: 8px; border: 1px solid #e9d9c5; background: #faf0e2; padding: 10px; border-radius: 8px; }
+  .chosen-date { display: block; margin-top: 2px; font-weight: 600; }
+  .evidence-next { margin-top: 9px; min-height: 36px; white-space: normal; text-align: left; }
+  .evidence-sources { display: grid; gap: 5px; list-style: none; padding: 0; margin: 0; }
+  .evidence-sources li { display: grid; justify-items: start; gap: 1px; }
+  .evidence-sources .text-button { white-space: normal; text-align: left; }
+  .trash-undo { position: fixed; z-index: 8; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 9px; max-width: calc(100vw - 24px); background: #fffefa; border: 1px solid #c4b399; border-radius: 9px; font-size: 12px; box-shadow: 0 8px 28px #1b291622; }
+  .trash-undo span { overflow-wrap: anywhere; }
+  @media (max-width: 900px) {
+    .board:not(.showing-detail) .detail-panel,
+    .board.showing-detail .list-panel,
+    .board.showing-detail .filter-strip { display: none; }
+  }
   :root {
     font-family: 'Be Vietnam Pro', system-ui, sans-serif;
     color: #20221d;

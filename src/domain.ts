@@ -41,6 +41,12 @@ export interface ScanReceipt {
   detail: string;
   audio: boolean;
   frame: boolean;
+  sources?: Partial<Record<MediaSource, ScanSource>>;
+}
+
+export interface ScanSource {
+  state: 'done' | 'empty' | 'failed';
+  detail: string;
 }
 
 export const scanLabels: Record<ScanReceipt['state'], string> = {
@@ -62,6 +68,7 @@ export interface Clip {
   localMedia: boolean;
   demoMedia?: boolean | string;
   mediaRevision?: string;
+  fileHash?: string;
   masks?: EvidenceMask[];
 }
 
@@ -169,10 +176,14 @@ export function localTime(now = new Date()) {
 }
 
 export function timestamp(seconds: number) {
-  const s = Math.max(0, Math.floor(seconds));
+  const s = Math.max(0, Math.round(seconds));
   const mm = String(Math.floor(s % 3600 / 60)).padStart(2, '0');
   const ss = String(s % 60).padStart(2, '0');
   return s >= 3600 ? `${Math.floor(s / 3600)}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+export function displayDateTime(value: string) {
+  return value ? `${displayDate(value)}, ${value.slice(11, 16)}` : '';
 }
 
 export function displayDate(value: string) {

@@ -11,7 +11,7 @@ interface ModelOptions {
   device: 'wasm';
   dtype: 'q8';
   revision: string;
-  progress_callback: (update: { status: string; progress: number }) => void;
+  progress_callback: (update: { status: string; progress?: number }) => void;
 }
 
 const createTranscriber = pipeline as unknown as
@@ -20,13 +20,17 @@ const createTranscriber = pipeline as unknown as
 let model: Promise<AutomaticSpeechRecognitionPipeline> | undefined;
 
 function downloadModel() {
+  let lastPercent = -1;
   return createTranscriber('automatic-speech-recognition', 'huuquyet/PhoWhisper-base', {
     device: 'wasm',
     dtype: 'q8',
     revision: '7623a803636be73f54c30dfa4ce1c42cdc9bbbcf',
     progress_callback: update => {
-      if (update.status === 'progress') {
-        self.postMessage({ kind: 'progress', message: `Tải mô hình giọng nói · ${Math.floor(update.progress)}%` });
+      if (update.status !== 'progress_total' || update.progress === undefined || !Number.isFinite(update.progress)) return;
+      const percent = Math.round(update.progress);
+      if (percent > lastPercent) {
+        lastPercent = percent;
+        self.postMessage({ kind: 'progress', message: `Tải mô hình giọng nói · ${percent}%` });
       }
     },
   });
@@ -42,9 +46,18 @@ async function loadModel() {
   }
 }
 
-async function recognize(samples: Float32Array) {
+async function prepare() {
   model ??= loadModel();
-  const transcriber = await model;
+  try { return await model; }
+  catch (error) {
+    model = undefined;
+    console.debug('PhoWhisper initialization:', error);
+    throw Error('Chưa mở được mô hình lời thoại. Kiểm tra kết nối mạng rồi thử lại, hoặc dùng phụ đề SRT/VTT.');
+  }
+}
+
+async function recognize(samples: Float32Array) {
+  const transcriber = await prepare();
   self.postMessage({ kind: 'progress', message: 'Đang nhận dạng lời thoại tiếng Việt…' });
   const output = await transcriber(samples, {
     language: 'vietnamese', task: 'transcribe', return_timestamps: true,
@@ -61,11 +74,16 @@ async function recognize(samples: Float32Array) {
   return evidence;
 }
 
-self.addEventListener('message', async (event: MessageEvent<Float32Array>) => {
+self.addEventListener('message', async (event: MessageEvent<Float32Array | 'prepare'>) => {
   try {
-    self.postMessage({ kind: 'success', evidence: await recognize(event.data) });
+    if (event.data === 'prepare') {
+      await prepare();
+      self.postMessage({ kind: 'success' });
+    } else self.postMessage({ kind: 'success', evidence: await recognize(event.data) });
   } catch (error) {
-    model = undefined;
-    self.postMessage({ kind: 'error', message: error instanceof Error ? error.message : String(error) });
+    console.debug('PhoWhisper:', error);
+    self.postMessage({ kind: 'error', message: model
+      ? 'Chưa đọc được lời thoại trong clip này. Thử quét lại hoặc dùng phụ đề SRT/VTT.'
+      : 'Chưa mở được mô hình lời thoại. Kiểm tra kết nối mạng rồi thử lại, hoặc dùng phụ đề SRT/VTT.' });
   }
 });

@@ -1,5 +1,5 @@
-import { localTime, scanLabels } from './domain';
-import type { Clip, Evidence, ScanReceipt } from './domain';
+import { localTime, scanLabels, sourceLabels } from './domain';
+import type { Clip, ScanReceipt } from './domain';
 import { analyzeVideo, type ScanOptions } from './media';
 import { loadMedia } from './storage';
 import { demoAsset } from './demo';
@@ -18,15 +18,23 @@ export function needsScan(clip: Clip, options?: ScanOptions) {
     options.frame && !clip.evidence.some(row => row.source === 'frame');
 }
 
-export function scanReceipt(options: ScanOptions, count: number, notes: string[]): ScanReceipt {
+export function scanReceipt(options: ScanOptions, result: Awaited<ReturnType<typeof analyzeVideo>>): ScanReceipt {
+  const notes = Object.entries(result.sources).map(([source, outcome]) =>
+    `${sourceLabels[source as 'audio' | 'frame']} · ${outcome.detail}`);
+  const states = Object.values(result.sources).map(outcome => outcome.state);
   return {
-    ...options, at: localTime(), state: !count ? 'empty' : notes.length ? 'partial' : 'ready',
-    detail: notes.join(' · ').slice(0, 1600) || `Đã đọc ${count} đoạn.`,
+    ...options, at: localTime(), sources: result.sources,
+    state: result.evidence.length ? states.every(state => state === 'done') ? 'ready' : 'partial'
+      : states.includes('failed') ? 'failed' : 'empty',
+    detail: notes.join(' ').slice(0, 1600),
   };
 }
 
-export function completeScan(clip: Clip, options: ScanOptions, evidence: Evidence[], notes: string[]): Clip {
-  return { ...mergeScan(clip, evidence), lastScan: scanReceipt(options, evidence.length, notes) };
+export function completeScan(clip: Clip, options: ScanOptions, result: Awaited<ReturnType<typeof analyzeVideo>>): Clip {
+  const receipt = scanReceipt(options, result);
+  return { ...mergeScan(clip, result.evidence), lastScan: {
+    ...receipt, sources: { ...clip.lastScan?.sources, ...receipt.sources },
+  } };
 }
 
 export function failScan(clip: Clip, options: ScanOptions, detail: string): Clip {
@@ -44,9 +52,18 @@ export async function analyzeStoredClip(clip: Clip, options: ScanOptions, signal
   if (!file) throw Error('File video không còn trong bộ nhớ trình duyệt.');
   const analysis = await analyzeVideo(file, options, progress, signal);
   signal.throwIfAborted();
-  return completeScan(clip, options, analysis.evidence, analysis.notes);
+  return completeScan(clip, options, analysis);
 }
 
 export function lastScanLabel(clip: Clip) {
   return clip.lastScan ? scanLabels[clip.lastScan.state] : 'Chưa chạy AI';
+}
+
+export function lastScanDetail(clip: Clip) {
+  const receipt = clip.lastScan;
+  if (!receipt || receipt.sources) return receipt?.detail;
+  if (/decode audio|EncodingError|failed to fetch|network|tunnel/i.test(receipt.detail)) {
+    return 'Lượt quét cũ gặp lỗi. Thử quét lại hoặc dùng phụ đề SRT/VTT để bổ sung lời thoại.';
+  }
+  return receipt.detail;
 }

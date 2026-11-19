@@ -33,6 +33,7 @@ Chọn **Dùng dữ liệu của bạn** và làm theo bước hiện trên màn
 - **Chiến dịch:** mở **Quản lý chiến dịch** để tạo hoặc đổi tên từng đợt sale. Mỗi chiến dịch có kho video, bảng ưu đãi, phản hồi và nhật ký riêng. Chọn **Dùng dữ liệu của bạn** để vào không gian mặc định. Dữ liệu đã lưu bằng phiên bản 1.0 vẫn mở trong không gian này.
 - **Bảng ưu đãi:** nhập trang đầu của XLSX hoặc file CSV/TSV có các cột `sku, name, voucher, price, gift, start, end, condition`. Dùng mẫu CSV trong app. Mỗi cặp SKU và voucher là một dòng. Dòng không có mã đại diện cho giá hoặc ưu đãi thông thường. Giá tính bằng VNĐ, thời hạn dùng giờ Việt Nam (UTC+7).
 - **Kho video:** thêm MP4, WebM, M4V hoặc MOV mà trình duyệt đọc được, tối đa 150 MB và 2 phút mỗi file, tối đa 20 file mỗi lượt. Gán SKU, ngày đăng và kiểu video. Có thể dùng phụ đề SRT/VTT hoặc ghi chú như `00:05 Còn 99k khi áp mã SALE99.`
+- Khi gặp file, link hoặc ID trùng trong cùng chiến dịch, app hỏi cách xử lý trước khi lưu. **Tìm video trùng** lọc các bản đã lưu. Sau khi xóa, **Hoàn tác xóa** khôi phục file, đoạn trích và phản hồi trong 30 giây hoặc trước khi chuyển chiến dịch.
 - **Nhập danh sách video.** từ **Kho video** chọn **Nhập danh sách** và tải mẫu CSV nếu cần. App xem trước dòng mới, dòng cập nhật, dòng trùng và dòng lỗi. Link hoặc ID nhận diện video. Cập nhật giữ file và đoạn trích đã lưu. Cột có thể nhập gồm `title, sku, link, published, format, video_id, creator, views, orders`. Với ID dài trong Excel, đặt ô ở dạng văn bản hoặc dùng link TikTok đầy đủ. Các số liệu là số được nhập vào chiến dịch.
 - **Quét hàng loạt.** chọn tối đa 20 video đã có file, chọn đọc chữ, lời thoại hoặc cả hai. Kết quả mỗi video được lưu ngay. Khi dừng, phần còn lại được giữ trong lựa chọn. Dùng bộ lọc trong kho để tìm clip thiếu SKU, bằng chứng hoặc file.
 - **Rà và xử lý:** chọn thời điểm, sửa các đoạn AI đọc nhầm, đánh dấu việc riêng lẻ hoặc hàng loạt rồi tải CSV. Khi lưu bảng mới, app chỉ tính lại SKU đã đổi hoặc clip có dữ liệu mới. Khi đổi thời điểm, app tính lại toàn bộ kho. Nhật ký lưu tối đa 40 báo cáo gần nhất. Sắp xếp danh sách việc theo mức cần xử lý, số đơn hoặc lượt xem đã nhập.
@@ -43,6 +44,8 @@ Chọn **Dùng dữ liệu của bạn** và làm theo bước hiện trên màn
 `src/media.ts` lấy mẫu khung hình trong trình duyệt. `src/speech.worker.ts` chạy PhoWhisper Base tinh chỉnh cho tiếng Việt bằng WebAssembly trong Web Worker. OCR dùng Tesseract tiếng Việt và tiếng Anh. `src/claims.ts` trích giá, voucher, quà tặng và thời hạn. `src/audit.ts` đối chiếu theo SKU và phiên bản ưu đãi. IndexedDB lưu file video và dữ liệu của từng chiến dịch.
 
 Lần đầu dùng lời thoại, trình duyệt tải mô hình khoảng 80 MB từ Hugging Face. OCR dùng các gói đi cùng app. Nội dung video được xử lý tại chỗ. Xóa dữ liệu trang trong trình duyệt sẽ xóa các chiến dịch chưa sao lưu.
+
+Trong hộp **Thêm video**, có thể chuẩn bị mô hình lời thoại trước khi quét. Mục **Nguồn bằng chứng** cho biết phần nào đã đọc được, phần nào gặp lỗi và cho mở trực tiếp các đoạn theo nguồn.
 
 Kết quả phản ánh bảng shop nhập tại thời điểm rà. Giá theo từng khách hoặc điều kiện thanh toán cần dữ liệu tương ứng. AI có thể bỏ sót chữ xuất hiện trong thời gian ngắn hoặc đọc sai lời thoại có nhạc nền. Dùng clip gốc và trạng thái **Cần xác nhận** để kiểm tra các đoạn mơ hồ.
 

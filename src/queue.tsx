@@ -7,6 +7,7 @@ import { auditCsv, download } from './files';
 import { Modal, TableRegion, Tag } from './ui';
 import { numberLabel } from './catalog';
 import { queueEntries, reviewOpen } from './workflow';
+import { coverageHelp } from './audit';
 
 type QueueFilter = 'open' | 'done' | 'wrong' | 'all';
 type QueueSort = 'severity' | 'orders' | 'views';
@@ -22,6 +23,7 @@ export function QueueView({ workspace, busy, exportBlocked, onReview, onNote, on
   onOpen: (clip: Clip, finding: Finding) => void;
 }) {
   const entries = useMemo(() => queueEntries(workspace), [workspace]);
+  const knownSkus = new Set(workspace.versions.at(-1)?.offers.map(offer => offer.sku));
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<QueueFilter>('open');
   const [sort, setSort] = useState<QueueSort>('severity');
@@ -133,7 +135,7 @@ export function QueueView({ workspace, busy, exportBlocked, onReview, onNote, on
             clip.creator, clip.stats?.orders === undefined ? '' : numberLabel(clip.stats.orders) + ' đơn',
             clip.stats?.views === undefined ? '' : numberLabel(clip.stats.views) + ' lượt xem',
           ].filter(Boolean).join(' · ')}</small>}
-          <p>{finding.reason}</p>
+          <p>{finding.kind === 'coverage' && !finding.evidence ? coverageHelp(clip, knownSkus.has(clip.sku)).reason : finding.reason}</p>
         </td>
         <td><Tag verdict={finding.verdict} /><small>{finding.claim}</small></td>
         <td><select aria-label={`Tiến độ ${clip.title} · ${kindLabels[finding.kind]}`} value={review ?? ''}

@@ -18,7 +18,8 @@ import {
   changeEvidence, leadVerdict, prepareWorkspace, queueEntries, recordAudit, reviewOpen, setFindingNote, setReviews, updatedReport,
 } from './workflow';
 import { ClipDialog, OfferDialog, type DraftClip } from './dialogs';
-import { displayDate, localTime, verdictLabels } from './domain';
+import { findDuplicateVideos, inspectUploads, type DuplicateChoice } from './duplicates';
+import { displayDate, displayDateTime, localTime, verdictLabels } from './domain';
 import type { Campaign, CampaignDraft, Clip, Evidence, Finding, Offer, Review, Verdict, Workspace } from './domain';
 import { auditCsv, download, downloadBlob, importOffers } from './files';
 import { analyzeVideo, videoMetadata, type ScanOptions } from './media';
@@ -30,6 +31,7 @@ import { Brand, Modal } from './ui';
 
 type Page = 'report' | 'queue' | 'clips' | 'offers' | 'history' | 'guide';
 type Notice = { text: string; error?: boolean };
+type DeletedVideo = { clip: Clip; blob?: Blob; reviews: Workspace['reviews']; notes: NonNullable<Workspace['notes']> };
 const pages = [
   { id: 'report', label: 'Rà soát', icon: LayoutDashboard },
   { id: 'queue', label: 'Việc cần làm', icon: ClipboardList },
@@ -54,6 +56,9 @@ const descriptions: Record<Page, string> = {
 };
 
 function errorText(error: unknown) {
+  if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+    return 'Bộ nhớ trình duyệt đã đầy. Sao lưu chiến dịch và giải phóng dung lượng trước khi thử lại.';
+  }
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -84,15 +89,18 @@ export function App() {
   const [page, setPage] = useState<Page>('report');
   const [filter, setFilter] = useState<Verdict | 'all'>('all');
   const [clipFilters, setClipFilters] = useState(allClipFilters);
+  const [duplicateIds, setDuplicateIds] = useState<Set<string>>();
   const [selected, setSelected] = useState('');
   const [date, setDate] = useState('');
   const [dialog, setDialog] = useState<'clip' | 'offers' | 'delete' | 'campaigns' | 'evidence' | 'catalog' | 'batch' | null>(null);
   const [editing, setEditing] = useState<Clip>();
   const [evidenceIndex, setEvidenceIndex] = useState<number | null>(null);
   const [findingFocus, setFindingFocus] = useState('');
+  const [showDetail, setShowDetail] = useState(false);
   const todo = useMemo(() => workspace ? queueEntries(workspace).filter(row => reviewOpen(row.review)).length : 0, [workspace]);
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [deleted, setDeleted] = useState<DeletedVideo>();
   const cancel = useRef<AbortController | null>(null);
   const importInput = useRef<HTMLInputElement>(null);
   const writing = useRef(false);
@@ -115,8 +123,11 @@ export function App() {
       setPage('report');
       setFilter('all');
       setClipFilters(allClipFilters);
+      setDuplicateIds(undefined);
       setSelected(data.clips[0]?.id ?? '');
       setFindingFocus('');
+      setShowDetail(false);
+      setDeleted(undefined);
       setNotice(null);
       try { window.localStorage.setItem('ra-clip-mode', key); } catch { /* Browser settings can block localStorage. */ }
     } finally { opening.current = false; setBusy(''); }
@@ -142,6 +153,11 @@ export function App() {
     });
     return () => window.removeEventListener('ra-clip-storage-blocked', blocked);
   }, []);
+  useEffect(() => {
+    if (!deleted) return;
+    const timer = setTimeout(() => setDeleted(undefined), 30_000);
+    return () => clearTimeout(timer);
+  }, [deleted]);
 
   async function persist(next: Workspace, media?: MediaChange[]) {
     if (writing.current) throw Error('Đang lưu thay đổi. Thử lại sau khi lưu xong.');
@@ -149,6 +165,7 @@ export function App() {
     try {
       const saved = await saveWorkspace(active, next, media);
       setWorkspace(saved);
+      setDuplicateIds(undefined);
       if (active !== 'demo') {
         const current = saved.clips.length;
         const openItems = queueEntries(saved).filter(row => reviewOpen(row.review)).length;
@@ -156,13 +173,17 @@ export function App() {
           ? { ...item, updatedAt: localTime(), clipCount: current, todoCount: openItems } : item));
       }
       return saved;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'QuotaExceededError') throw Error(errorText(error));
+      throw error;
     } finally { writing.current = false; }
   }
 
   function notify(text: string, error = false) { setNotice({ text, error }); }
-  function startAdd() { setEditing(undefined); setDialog('clip'); }
+  function startAdd() { setNotice(null); setEditing(undefined); setDialog('clip'); }
   function go(next: Page) {
-    setPage(next); setFilter('all'); setClipFilters(allClipFilters); setFindingFocus('');
+    setPage(next); setFilter('all'); setClipFilters(allClipFilters); setFindingFocus(''); setShowDetail(false);
+    setDuplicateIds(undefined);
     requestAnimationFrame(() => {
       pageHeading.current?.focus({ preventScroll: true });
       pageHeading.current?.scrollIntoView({ block: 'start' });
@@ -177,16 +198,20 @@ export function App() {
   }
   function selectClip(id: string) {
     setSelected(id); setFindingFocus('');
-    if (window.matchMedia('(max-width: 900px)').matches) focusBoard('clip-evidence');
+    if (window.matchMedia('(max-width: 900px)').matches) {
+      setShowDetail(true);
+      focusBoard('clip-evidence');
+    }
   }
   function openFinding(clip: Clip, finding: Finding) {
     setPage('report'); setFilter('all'); setClipFilters(allClipFilters); setSelected(clip.id); setFindingFocus(finding.id);
+    setShowDetail(true);
     focusBoard('clip-evidence');
   }
   function startEvidence(clip: Clip, index: number | null) {
     setEditing(clip); setEvidenceIndex(index); setDialog('evidence');
   }
-  function startEdit(clip: Clip) { setEditing(clip); setDialog('clip'); }
+  function startEdit(clip: Clip) { setNotice(null); setEditing(clip); setDialog('clip'); }
   function startDelete(clip: Clip) { setEditing(clip); setDialog('delete'); }
   function clearDialog() { setDialog(null); setEditing(undefined); }
 
@@ -197,7 +222,8 @@ export function App() {
   const version = data.versions.at(-1);
   const results = data.audit?.results ?? [];
   const resultIndex = new Map(results.map(row => [row.clipId, row]));
-  const availableClips = visibleClips(data.clips, resultIndex, page === 'report' ? filter : 'all', clipFilters);
+  const candidates = page === 'clips' && duplicateIds ? data.clips.filter(clip => duplicateIds.has(clip.id)) : data.clips;
+  const availableClips = visibleClips(candidates, resultIndex, page === 'report' ? filter : 'all', clipFilters);
   const currentClip = availableClips.find(clip => clip.id === selected) ?? availableClips[0];
   const dateChanged = date !== data.checkedAt;
   const found = results.filter(row => leadVerdict(row.findings) === 'action').length;
@@ -266,6 +292,21 @@ export function App() {
     notify(`Đã nhập ${count} video vào kho.`);
   }
 
+  async function checkDuplicates() {
+    if (busy) return;
+    const controller = new AbortController();
+    cancel.current = controller;
+    setBusy('Đang tìm video trùng trong chiến dịch…');
+    try {
+      const matches = await findDuplicateVideos(data.clips, controller.signal);
+      setDuplicateIds(matches);
+      setClipFilters(allClipFilters);
+      setShowDetail(false);
+      notify(matches.size ? `Tìm thấy ${matches.size} video trùng file, link hoặc ID.` : 'Không tìm thấy video trùng trong chiến dịch.');
+    } catch (error) { notify(controller.signal.aborted ? 'Đã dừng tìm video trùng.' : errorText(error), !controller.signal.aborted); }
+    finally { setBusy(''); cancel.current = null; }
+  }
+
   async function scanBatch(ids: string[], options: ScanOptions, signal: AbortSignal, onEvent: (event: BatchEvent) => void) {
     let current = data;
     const processed = new Set<string>();
@@ -301,19 +342,22 @@ export function App() {
     notify(`${label} ${success} video có kết quả · ${warnings} cần xem lại.`);
   }
 
-  async function saveClips(drafts: DraftClip[], options: ScanOptions) {
+  async function saveClips(drafts: DraftClip[], options: ScanOptions, choice: DuplicateChoice) {
     const controller = new AbortController();
     cancel.current = controller;
-    setBusy('Đang chuẩn bị video…');
+    setBusy('Đang kiểm tra video trùng…');
+    const original = choice.replace ?? editing;
     const media: MediaChange[] = [];
     const rows: Clip[] = [];
-    const warnings: string[] = [];
+    let warnings = 0;
     try {
+      const incoming = drafts.map(draft => ({ ...draft, link: original?.link === draft.link || choice.replace ? '' : draft.link }));
+      const hashes = await inspectUploads(incoming, data.clips.filter(clip => clip.id !== original?.id), choice.separate, controller.signal);
       for (const [index, draft] of drafts.entries()) {
         controller.signal.throwIfAborted();
-        const id = editing?.id ?? crypto.randomUUID();
-        let evidence = editing?.evidence ?? [];
-        let lastScan = draft.file ? undefined : editing?.lastScan;
+        const id = original?.id ?? crypto.randomUUID();
+        let evidence = original?.evidence ?? [];
+        let lastScan = draft.file ? undefined : original?.lastScan;
         if (draft.evidence.length) evidence = evidence.filter(row => row.source === 'audio' || row.source === 'frame');
         if (draft.file) {
           const file = draft.file;
@@ -322,8 +366,8 @@ export function App() {
             const result = await analyzeVideo(file, options, message =>
               setBusy(`${index + 1}/${drafts.length} · ${message}`), controller.signal);
             evidence = [...evidence, ...result.evidence];
-            lastScan = scanReceipt(options, result.evidence.length, result.notes);
-            warnings.push(...result.notes.map(note => `${draft.title} · ${note}`));
+            lastScan = scanReceipt(options, result);
+            if (lastScan.state !== 'ready') warnings++;
           } else {
             setBusy(`${index + 1}/${drafts.length} · Kiểm tra video…`);
             (await videoMetadata(file, controller.signal)).release();
@@ -331,39 +375,43 @@ export function App() {
           media.push({ id, blob: file });
         }
         rows.push({
-          ...editing,
-          id, title: draft.title, sku: draft.sku, link: draft.link, published: draft.published, format: draft.format,
-          videoId: draft.link && draft.link !== editing?.link ? tiktokId(draft.link) || undefined : editing?.videoId,
-          creator: draft.creator, stats: draft.stats, lastScan,
+          ...original,
+          id, title: choice.replace?.title ?? draft.title, sku: choice.replace?.sku ?? draft.sku,
+          link: choice.replace?.link ?? draft.link, published: choice.replace?.published ?? draft.published,
+          format: choice.replace ? choice.replace.format : draft.format,
+          videoId: choice.replace ? choice.replace.videoId : draft.link !== editing?.link ? tiktokId(draft.link) || undefined : editing?.videoId,
+          creator: choice.replace ? choice.replace.creator : draft.creator,
+          stats: choice.replace ? choice.replace.stats : draft.stats, lastScan,
           evidence: [...evidence, ...draft.evidence].sort((a, b) => a.start - b.start),
-          localMedia: Boolean(draft.file || editing?.localMedia),
-          demoMedia: draft.file ? undefined : editing?.demoMedia,
-          mediaRevision: draft.file ? crypto.randomUUID() : editing?.mediaRevision,
-          masks: draft.file ? [] : editing?.masks,
+          localMedia: Boolean(draft.file || original?.localMedia),
+          demoMedia: draft.file ? undefined : original?.demoMedia,
+          mediaRevision: draft.file ? crypto.randomUUID() : original?.mediaRevision,
+          fileHash: hashes[index] ?? original?.fileHash,
+          masks: draft.file ? [] : original?.masks,
         });
       }
       controller.signal.throwIfAborted();
-      const clips = editing ? data.clips.map(clip => clip.id === editing.id ? rows[0] : clip) : [...data.clips, ...rows];
+      const clips = original ? data.clips.map(clip => clip.id === original.id ? rows[0] : clip) : [...data.clips, ...rows];
       setBusy('Đang lưu video…');
       cancel.current = null;
       await persist(updatedReport({ ...data, clips }, 'clips'), media);
       setSelected(rows[0].id);
+      setShowDetail(false);
       setFilter('all');
       if (!editing) setClipFilters(allClipFilters);
       if (page !== 'report') setPage('clips');
       clearDialog();
-      notify(`Đã lưu ${rows.length} video.${warnings.length ? ' ' + warnings.slice(0, 2).join(' · ') : ''}`, warnings.length > 0);
+      notify(`Đã lưu ${rows.length} video.${warnings ? ` ${warnings} video cần xem trạng thái quét trong phần Bằng chứng.` : ''}`);
     } catch (error) {
       if (controller.signal.aborted) throw Error('Đã dừng phân tích. Video chưa được lưu.');
       throw error;
     } finally { setBusy(''); cancel.current = null; }
   }
 
-  async function rescan(clip: Clip) {
+  async function rescan(clip: Clip, options: ScanOptions = { audio: true, frame: true }) {
     const controller = new AbortController();
     cancel.current = controller;
     setBusy('Đang mở video…');
-    const options = { audio: true, frame: true };
     try {
       let next: Clip;
       try { next = await analyzeStoredClip(clip, options, controller.signal, setBusy); }
@@ -388,11 +436,32 @@ export function App() {
       const isOtherClip = ([key]: [string, unknown]) => {
         try { return JSON.parse(key)[0] !== editing.id; } catch { return false; }
       };
-      const reviews = Object.fromEntries(Object.entries(data.reviews).filter(isOtherClip));
-      const notes = Object.fromEntries(Object.entries(data.notes ?? {}).filter(isOtherClip));
+      const reviewEntries = Object.entries(data.reviews);
+      const noteEntries = Object.entries(data.notes ?? {});
+      const reviews = Object.fromEntries(reviewEntries.filter(isOtherClip));
+      const notes = Object.fromEntries(noteEntries.filter(isOtherClip));
+      const blob = editing.localMedia ? await loadMedia(editing.id) : undefined;
       await persist(updatedReport({ ...data, clips, reviews, notes }, 'clips'), [{ id: editing.id, blob: null }]);
+      setDeleted({ clip: editing, blob, reviews: Object.fromEntries(reviewEntries.filter(row => !isOtherClip(row))),
+        notes: Object.fromEntries(noteEntries.filter(row => !isOtherClip(row))) });
       clearDialog();
-      notify('Đã xóa video khỏi kho.');
+      setShowDetail(false);
+      setNotice(null);
+    } catch (error) { notify(errorText(error), true); }
+    finally { setBusy(''); }
+  }
+
+  async function undoDelete() {
+    if (!deleted || busy) return;
+    setBusy('Đang khôi phục video…');
+    try {
+      const { clip, blob, reviews, notes } = deleted;
+      await persist(updatedReport({
+        ...data, clips: [...data.clips, clip], reviews: { ...data.reviews, ...reviews }, notes: { ...data.notes, ...notes },
+      }, 'clips'), blob ? [{ id: clip.id, blob }] : []);
+      setDeleted(undefined);
+      setSelected(clip.id);
+      notify('Đã khôi phục video và phản hồi.');
     } catch (error) { notify(errorText(error), true); }
     finally { setBusy(''); }
   }
@@ -490,7 +559,7 @@ export function App() {
           : <ShopStart version={version} clips={data.clips} hasReport={results.length > 0} busy={!!busy}
             onOffers={() => go('offers')} onAdd={startAdd} onEdit={startEdit}
             onScan={clip => { setEditing(clip); setDialog('batch'); }}
-            onResults={() => { setFilter('all'); setClipFilters(allClipFilters); focusBoard('clip-list-heading'); }} />)}
+            onResults={() => { setFilter('all'); setClipFilters(allClipFilters); setShowDetail(false); focusBoard('clip-list-heading'); }} />)}
         {busy && !dialog && <div className="inline-status" role="status"><LoaderCircle size={17} className="spin" /> {busy}
           {cancel.current && <button className="text-button" onClick={() => cancel.current?.abort()}>Dừng</button>}
         </div>}
@@ -503,8 +572,9 @@ export function App() {
             <div className="scan-info"><FileSpreadsheet size={19} /><span><strong>{version ? `Bảng ưu đãi · v${data.versions.length}` : 'Chưa có bảng ưu đãi'}</strong>
               <small>{version ? `${version.offers.length} dòng · ${found} video cần xử lý` : 'Nhập giá, voucher và quà tặng theo SKU'}</small></span></div>
             <form className="scan-controls" onSubmit={event => { event.preventDefault(); void runReport(); }}>
-              <label><span>Rà tại (UTC+7)</span><input type="datetime-local" aria-label="Thời điểm rà (UTC+7)" value={date}
-                onChange={event => setDate(event.target.value)} required disabled={!!busy} /></label>
+              <label><span>Rà tại (UTC+7)<small className="chosen-date" id="chosen-date">{displayDateTime(date)}</small></span>
+                <input type="datetime-local" aria-label="Thời điểm rà (UTC+7)" aria-describedby="chosen-date" value={date}
+                  onChange={event => setDate(event.target.value)} required disabled={!!busy} /></label>
               <button type="submit" className="button dark" disabled={!!busy}><ScanLine size={17} /> Rà soát ngay</button>
             </form>
           </section>
@@ -521,10 +591,13 @@ export function App() {
           <div><strong>{data.clips.length} video</strong><span>{data.clips.filter(clip => !clip.sku).length} chưa gán SKU</span>
             <span>{data.clips.filter(clip => !clip.evidence.length).length} chưa có bằng chứng</span></div>
           <div><button className="button secondary" disabled={!!busy} onClick={() => setDialog('catalog')}><Upload size={16} /> Nhập danh sách</button>
+            <button className="button secondary" disabled={!!busy || data.clips.length < 2}
+              onClick={() => duplicateIds ? setDuplicateIds(undefined) : void checkDuplicates()}>
+              {duplicateIds ? 'Hiện tất cả video' : 'Tìm video trùng'}</button>
             <button className="button dark" disabled={!!busy || !data.clips.some(clip => clip.localMedia || clip.demoMedia)}
               onClick={() => setDialog('batch')}><ScanLine size={16} /> Quét hàng loạt</button></div>
         </section>}
-        {(page === 'report' || page === 'clips') && <div className={`board${currentClip ? '' : ' single-column'}`}>
+        {(page === 'report' || page === 'clips') && <div className={`board${currentClip ? (showDetail ? ' showing-detail' : '') : ' single-column'}`}>
           {page === 'report' && filter !== 'all' && <div className="filter-strip">Đang lọc: {verdictLabels[filter]}
             <button className="text-button" onClick={() => setFilter('all')}>Xóa bộ lọc <X size={14} /></button></div>}
           <ClipList key={page} entries={availableClips} total={data.clips.length} results={resultIndex} filters={clipFilters}
@@ -533,7 +606,9 @@ export function App() {
           {currentClip && <ClipDetail key={currentClip.id + '|' + findingFocus} clip={currentClip} result={resultIndex.get(currentClip.id)}
             focusedFinding={findingFocus} reviews={data.reviews} notes={data.notes} onReview={(id, value) => void review([id], value)}
             onEdit={startEdit} onDelete={startDelete} onEvidence={startEvidence}
-            onScan={clip => void rescan(clip)} onBack={() => focusBoard('clip-list-heading')} busy={!!busy} />}
+            hasSku={Boolean(version?.offers.some(offer => offer.sku === currentClip.sku))}
+            onOffers={() => go('offers')} onScan={(clip, options) => void rescan(clip, options)}
+            onBack={() => { setShowDetail(false); focusBoard('clip-list-heading'); }} busy={!!busy} />}
         </div>}
         {page === 'queue' && <QueueView workspace={data} onOpen={openFinding} onReview={review} onNote={note} busy={!!busy} exportBlocked={dateChanged} />}
         {page === 'history' && <HistoryView snapshots={data.snapshots ?? []} onReport={() => go('report')} />}
@@ -549,7 +624,8 @@ export function App() {
         if (file) void handleImport(file);
       }} />
     {dialog === 'clip' && <ClipDialog clip={editing} skus={[...new Set(version?.offers.map(row => row.sku) ?? [])]}
-      onClose={clearDialog} onSave={saveClips} busy={busy} onCancel={() => cancel.current?.abort()} />}
+      onClose={clearDialog} onSave={saveClips} busy={busy} onCancel={() => cancel.current?.abort()}
+      onOpen={clip => { clearDialog(); setClipFilters(allClipFilters); setFilter('all'); selectClip(clip.id); }} />}
     {dialog === 'catalog' && <CatalogDialog clips={data.clips} onApply={importCatalog} onClose={clearDialog} />}
     {dialog === 'batch' && <BatchDialog clips={data.clips} initialClipId={editing?.id} onRun={scanBatch} onClose={clearDialog} />}
     {dialog === 'campaigns' && <CampaignManager items={campaigns} active={active} onOpen={launchCampaign}
@@ -563,7 +639,11 @@ export function App() {
         <button className="button primary" onClick={() => void deleteClip()} disabled={!!busy}>Xóa video</button>
       </div>
     </Modal>}
-    {notice && <div className={`toast ${notice.error ? 'error' : ''}`} role={notice.error ? 'alert' : 'status'}>
+    {deleted && !dialog && <div className="trash-undo">
+      <span role="status">Đã xóa video “{deleted.clip.title}”.</span>
+      <button type="button" className="button secondary" disabled={!!busy} onClick={() => void undoDelete()}>Hoàn tác xóa</button>
+    </div>}
+    {notice && !dialog && <div className={`toast ${notice.error ? 'error' : ''}`} role={notice.error ? 'alert' : 'status'}>
       {notice.error ? <CircleAlert size={19} /> : <CheckCircle2 size={19} />}
       <span>{notice.text}</span><button className="icon-button" aria-label="Ẩn thông báo" onClick={() => setNotice(null)}><X size={16} /></button>
     </div>}

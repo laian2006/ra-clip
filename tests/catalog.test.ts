@@ -60,7 +60,7 @@ describe('caption and scan state', () => {
 
   it('keeps the previous evidence through empty and failed scans', () => {
     const options = { audio: false, frame: true };
-    expect(completeScan(clip, options, [], ['Không đọc được chữ.'])).toMatchObject({
+    expect(completeScan(clip, options, { evidence: [], sources: { frame: { state: 'empty', detail: 'Không đọc được chữ.' } } })).toMatchObject({
       evidence: clip.evidence, lastScan: { state: 'empty', frame: true },
     });
     expect(failScan(clip, options, 'Thiếu file')).toMatchObject({ evidence: clip.evidence, lastScan: { state: 'failed' } });

@@ -5,15 +5,19 @@ import {
 } from 'lucide-react';
 import { fold } from './claims';
 import { clipFormats, kindLabels, reviewLabels, sourceLabels, timestamp, verdictLabels } from './domain';
-import type { Clip, ClipFormat, ClipResult, Finding, Review, Verdict } from './domain';
+import type { Clip, ClipFormat, ClipResult, Evidence, Finding, Review, Verdict } from './domain';
 import { loadMedia } from './storage';
 import { demoAsset } from './demo';
 import { EvidenceTimeline } from './evidence';
 import { captionsFor } from './captions';
-import { lastScanLabel } from './batch';
+import { lastScanDetail, lastScanLabel } from './batch';
+import { coverageHelp } from './audit';
+import type { ScanOptions } from './media';
 import { numberLabel } from './catalog';
 import { leadVerdict, verdicts } from './workflow';
 import { ClipGlyph, Empty, FindingReason, Tag, verdictIcons } from './ui';
+
+type EvidenceSource = Evidence['source'];
 
 export function Metrics({ results, filter, onFilter }: {
   results: ClipResult[]; filter: Verdict | 'all'; onFilter: (value: Verdict | 'all') => void;
@@ -182,13 +186,15 @@ function ClipPlayer({ clip, jump }: { clip: Clip; jump: { time: number; tick: nu
   </div>;
 }
 
-export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onReview, onEdit, onDelete, onEvidence, onScan, onBack, busy }: {
+export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onReview, onEdit, onDelete, onEvidence, onScan, onBack, onOffers, hasSku, busy }: {
   clip: Clip; result?: ClipResult; focusedFinding: string; reviews: Record<string, Review>;
   notes?: Record<string, string>; onReview: (id: string, value: Review | '') => void;
-  onEdit: (clip: Clip) => void; onDelete: (clip: Clip) => void; onScan: (clip: Clip) => void; onBack: () => void; busy: boolean;
+  onEdit: (clip: Clip) => void; onDelete: (clip: Clip) => void; onScan: (clip: Clip, options?: ScanOptions) => void;
+  onBack: () => void; onOffers: () => void; hasSku: boolean; busy: boolean;
   onEvidence: (clip: Clip, index: number | null) => void;
 }) {
   const [tab, setTab] = useState<'results' | 'segments'>('results');
+  const [segmentSource, setSegmentSource] = useState<'all' | EvidenceSource>('all');
   const [findingId, setFinding] = useState(focusedFinding);
   const [jump, setJump] = useState<{ time: number; tick: number } | null>(() => {
     const evidence = result?.findings.find(row => row.id === focusedFinding)?.evidence;
@@ -199,6 +205,28 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
   const active = findings.find(row => row.id === findingId) ?? findings[0];
   const activeReview = active ? reviews[active.id] : undefined;
   const playable = clip.localMedia || Boolean(clip.demoMedia);
+  const coverage = active?.kind === 'coverage' && !active.evidence ? coverageHelp(clip, hasSku) : undefined;
+  const unclearEvidence = active?.kind === 'coverage' ? active.evidence : undefined;
+  const unclearIndex = unclearEvidence ? clip.evidence.findIndex(row => row.source === unclearEvidence.source &&
+    row.start === unclearEvidence.start && row.text === unclearEvidence.text) : -1;
+  const sourceKeys = Object.keys(sourceLabels) as EvidenceSource[];
+
+  function openSegments(source: 'all' | EvidenceSource = 'all') {
+    setSegmentSource(source);
+    setTab('segments');
+    requestAnimationFrame(() => document.getElementById('timeline-heading')?.focus());
+  }
+
+  const step = unclearIndex >= 0 ? 'correct' : coverage?.action ?? (!hasSku ? 'sku' : active?.reason.includes('ngày đăng') ? 'edit' : 'offers');
+  const nextAction = {
+    sku: { label: 'Gán lại mã sản phẩm', run: () => onEdit(clip) },
+    audio: { label: playable ? 'Thử lại lời thoại' : 'Bổ sung phụ đề', run: () => playable ? onScan(clip, { audio: true, frame: false }) : onEdit(clip) },
+    segments: { label: 'Xem các đoạn đã đọc', run: () => openSegments() },
+    scan: { label: 'Quét video này', run: () => onScan(clip) },
+    correct: { label: 'Sửa đoạn lời thoại', run: () => onEvidence(clip, unclearIndex) },
+    edit: { label: 'Sửa thông tin hoặc thêm phụ đề', run: () => onEdit(clip) },
+    offers: { label: 'Kiểm tra bảng ưu đãi', run: onOffers },
+  }[step];
 
   function jumpTo(time: number) {
     setJump(previous => ({ time, tick: (previous?.tick ?? 0) + 1 }));
@@ -228,9 +256,9 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
       {playable && <button className="text-button scan-video" type="button" onClick={() => onScan(clip)} disabled={busy}><ScanLine size={15} /> Phân tích video bằng AI</button>}
       <div className="segmented evidence-tabs" role="group" aria-label="Xem bằng chứng">
         <button type="button" className={tab === 'results' ? 'active' : ''} aria-pressed={tab === 'results'} onClick={() => setTab('results')}>Phát hiện</button>
-        <button type="button" className={tab === 'segments' ? 'active' : ''} aria-pressed={tab === 'segments'} onClick={() => setTab('segments')}>Đoạn trích<span>{clip.evidence.length}</span></button>
+        <button type="button" className={tab === 'segments' ? 'active' : ''} aria-pressed={tab === 'segments'} onClick={() => openSegments()}>Đoạn trích<span>{clip.evidence.length}</span></button>
       </div>
-      {tab === 'segments' ? <EvidenceTimeline clip={clip} playable={playable} busy={busy}
+      {tab === 'segments' ? <EvidenceTimeline key={segmentSource} initialSource={segmentSource} clip={clip} playable={playable} busy={busy}
         onJump={jumpTo} onEdit={index => onEvidence(clip, index)} /> : active ? <>
         <div className={`evidence-card ${active.verdict}`}>
           <div className="evidence-top"><Tag verdict={active.verdict} />
@@ -239,9 +267,11 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
               : <span className="small-time">{timestamp(active.evidence.start)}</span>)}
           </div>
           {active.evidence && <blockquote>“{active.evidence.text}”</blockquote>}
-          <p>{active.reason}</p>
+          <p>{coverage?.reason ?? active.reason}</p>
           {active.reference && <div className="evidence-reference"><span>Bảng ưu đãi</span><strong>{active.reference}</strong></div>}
           {active.evidence && <p className="evidence-source">Nguồn · {sourceLabels[active.evidence.source]}</p>}
+          {active.verdict === 'review' && <button className="button secondary evidence-next" type="button" onClick={nextAction.run} disabled={busy}>
+            {nextAction.label}</button>}
         </div>
         <label className="review-field"><span><ListChecks size={16} /> Phản hồi của shop</span>
           <select value={activeReview ?? ''} aria-label="Phản hồi của shop" disabled={busy}
@@ -260,7 +290,20 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
       {(clip.creator || clip.stats) && <div className="clip-stats"><strong>Số liệu đã nhập</strong>
         {[clip.creator, clip.stats?.views === undefined ? '' : numberLabel(clip.stats.views) + ' lượt xem',
           clip.stats?.orders === undefined ? '' : numberLabel(clip.stats.orders) + ' đơn'].filter(Boolean).join(' · ')}</div>}
-      {clip.lastScan && <div className="clip-scan-summary"><strong>{lastScanLabel(clip)}</strong><span>{clip.lastScan.detail}</span></div>}
+      {(clip.lastScan || clip.evidence.length > 0) && <div className="clip-scan-summary">
+        <strong>Nguồn bằng chứng</strong>
+        <ul className="evidence-sources">{sourceKeys.map(source => {
+          const count = clip.evidence.filter(entry => entry.source === source).length;
+          const outcome = source === 'audio' || source === 'frame' ? clip.lastScan?.sources?.[source] : undefined;
+          if (!count && !outcome && source !== 'audio' && source !== 'frame') return null;
+          return <li key={source}>
+            {count ? <button type="button" className="text-button" onClick={() => openSegments(source)}>{sourceLabels[source]} · {count} đoạn</button>
+              : <span>{sourceLabels[source]} · {outcome ? '0 đoạn' : 'Chưa có kết quả'}</span>}
+            {outcome && <small>{outcome.detail}</small>}
+          </li>;
+        })}</ul>
+        {clip.lastScan && !clip.lastScan.sources && <span>{lastScanDetail(clip)}</span>}
+      </div>}
       <div className="clip-meta">
         <span>{clip.sku ? `SKU · ${clip.sku}` : 'Chưa gán SKU'}</span>
         <span><CalendarClock size={14} /> {clip.evidence.length} đoạn đã ghi nhận</span>

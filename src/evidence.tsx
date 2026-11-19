@@ -5,14 +5,15 @@ import { sourceLabels, timestamp } from './domain';
 import type { Clip, Evidence } from './domain';
 import { Modal } from './ui';
 
-export function EvidenceTimeline({ clip, playable, busy, onJump, onEdit }: {
-  clip: Clip; playable: boolean; busy: boolean; onJump: (at: number) => void; onEdit: (index: number | null) => void;
+export function EvidenceTimeline({ clip, playable, busy, initialSource, onJump, onEdit }: {
+  clip: Clip; playable: boolean; busy: boolean; initialSource: Evidence['source'] | 'all';
+  onJump: (at: number) => void; onEdit: (index: number | null) => void;
 }) {
-  const [source, setSource] = useState<Evidence['source'] | 'all'>('all');
+  const [source, setSource] = useState(initialSource);
   const [search, setSearch] = useState('');
   const rows = clip.evidence.flatMap((entry, index) =>
     (source === 'all' || entry.source === source) && fold(entry.text).includes(fold(search.trim())) ? [{ entry, index }] : []);
-  return <div className="timeline">
+  return <div className="timeline" id="timeline-heading" tabIndex={-1} role="region" aria-label="Các đoạn trích">
     <div className="timeline-tools">
       <label className="search-box"><Search size={16} /><input aria-label="Tìm đoạn trích" placeholder="Tìm đoạn trích…"
         value={search} onChange={event => setSearch(event.target.value)} /></label>

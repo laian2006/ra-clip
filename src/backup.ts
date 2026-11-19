@@ -65,7 +65,14 @@ function readMask(value: unknown): EvidenceMask {
 
 function readScan(value: unknown) {
   const row = object(value);
+  const rawSources = optionalRecord(row.sources);
+  const sources = Object.fromEntries((['audio', 'frame'] as const).flatMap(source => {
+    if (!rawSources[source]) return [];
+    const item = object(rawSources[source]);
+    return [[source, { state: oneOf(item.state, ['done', 'empty', 'failed'] as const), detail: string(item.detail, 1600) }]];
+  }));
   return { at: date(row.at), detail: string(row.detail, 1600), audio: row.audio === true, frame: row.frame === true,
+    sources: row.sources ? sources : undefined,
     state: oneOf(row.state, ['ready', 'partial', 'empty', 'failed'] as const) };
 }
 

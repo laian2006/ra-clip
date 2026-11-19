@@ -73,6 +73,7 @@ test('the mobile example opens the original evidence and returns to the video li
     await page.getByRole('button', { name: 'Xem một cảnh báo mẫu' }).tap();
     const evidence = page.locator('#clip-evidence');
     await expect(evidence).toBeFocused();
+    await expect(page.getByRole('heading', { name: 'Kết quả rà soát' })).toBeHidden();
     await expect(evidence.locator('blockquote')).toContainText('SALE99');
     await expect(evidence.locator('.evidence-reference')).toContainText('Bảng ưu đãi');
     await expect(evidence.getByRole('button', { name: 'Đến 00:05' })).toBeVisible();
@@ -80,6 +81,7 @@ test('the mobile example opens the original evidence and returns to the video li
     await expect(back).toBeInViewport({ ratio: 1 });
     expect((await back.boundingBox())!.y).toBeGreaterThanOrEqual((await page.locator('.sidebar').boundingBox())!.height);
     await back.tap();
+    await expect(evidence).toBeHidden();
     await expect(page.getByRole('heading', { name: 'Kết quả rà soát' })).toBeFocused();
     await page.getByRole('button', { name: /Review túi canvas/ }).tap();
     await expect(evidence).toBeFocused();
@@ -102,7 +104,7 @@ test('mobile layout keeps controls visible without horizontal overflow', async (
 });
 
 test('results always show evidence for a visible video, even after searching', async ({ page }) => {
-  await page.setViewportSize({ width: 773, height: 766 });
+  await page.setViewportSize({ width: 1024, height: 766 });
   await page.goto('/');
   const search = page.getByRole('textbox', { name: 'Tìm video' });
   const evidence = page.locator('#clip-evidence');

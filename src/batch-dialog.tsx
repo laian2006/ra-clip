@@ -4,7 +4,7 @@ import { fold } from './claims';
 import type { Clip } from './domain';
 import { scanLabels } from './domain';
 import type { ScanOptions } from './media';
-import { lastScanLabel, needsScan, type BatchEvent } from './batch';
+import { lastScanDetail, lastScanLabel, needsScan, type BatchEvent } from './batch';
 import { Modal } from './ui';
 
 const labels = { ...scanLabels, running: 'Đang quét', stopped: 'Đã dừng' };
@@ -26,6 +26,7 @@ export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
   const [total, setTotal] = useState(0);
   const [error, setError] = useState('');
   const [announced, setAnnounced] = useState('');
+  const [estimate, setEstimate] = useState<number>();
   const controller = useRef<AbortController | null>(null);
   const stopButton = useRef<HTMLButtonElement>(null);
   const startButton = useRef<HTMLButtonElement>(null);
@@ -49,13 +50,29 @@ export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
     controller.current = task;
     const ids = videos.map(clip => clip.id).filter(id => selected.has(id));
     const finished = new Set<string>();
+    let start = performance.now();
+    let measured = 0;
+    let measuredTime = 0;
+    let currentId = '';
+    setEstimate(undefined);
     setRunning(true); setError(''); setEvents({}); setTotal(ids.length); setAnnounced(`Bắt đầu quét ${ids.length} video.`);
     requestAnimationFrame(() => stopButton.current?.focus());
     try {
       await onRun(ids, options, task.signal, event => {
         setEvents(values => ({ ...values, [event.id]: event }));
+        if (event.state === 'running' && currentId !== event.id) {
+          currentId = event.id;
+          start = performance.now();
+        }
         if (event.state !== 'running') {
-          if (event.state !== 'stopped') finished.add(event.id);
+          if (event.state !== 'stopped') {
+            finished.add(event.id);
+            if (event.state === 'ready' || event.state === 'partial') {
+              measured++;
+              measuredTime += performance.now() - start;
+            }
+            if (measured) setEstimate(Math.max(1, Math.ceil(measuredTime / measured * (ids.length - finished.size) / 1000)));
+          }
           setAnnounced(`${videos.find(clip => clip.id === event.id)?.title ?? 'Video'} · ${labels[event.state]}`);
         }
       });
@@ -98,13 +115,15 @@ export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
           <label><input type="checkbox" checked={selected.has(clip.id)} disabled={running || (!selected.has(clip.id) && selected.size >= limit)}
             onChange={value => select(clip.id, value.target.checked)} /><span><strong>{clip.title}</strong><small>{clip.sku || 'Chưa gán SKU'}</small></span></label>
           <div><span className={`import-tag ${event?.state ?? clip.lastScan?.state ?? 'same'}`}>{event ? labels[event.state] : lastScanLabel(clip)}</span>
-            {(event?.detail || clip.lastScan?.detail) && <small>{event?.detail || clip.lastScan?.detail}</small>}</div>
+            {(event?.detail || lastScanDetail(clip)) && <small>{event?.detail || lastScanDetail(clip)}</small>}</div>
         </li>;
       })}</ul>
       {!filtered.length && <p className="empty-inline">Chưa có file video khớp bộ lọc.</p>}
       {(running || done > 0) && <div className="batch-progress">
         <label htmlFor="batch-progress">Đã hoàn tất {done}/{total} video trong lượt này</label>
         <progress id="batch-progress" max={Math.max(1, total)} value={done} />
+        {running && done < total && <p>{estimate === undefined ? 'Sẽ ước lượng sau khi quét xong video đầu tiên có kết quả.'
+          : `Còn khoảng ${estimate >= 60 ? `${Math.ceil(estimate / 60)} phút` : `${estimate} giây`} theo tốc độ các video vừa quét.`}</p>}
       </div>}
       <span className="sr-only" role="status" aria-atomic="true">{announced}</span>
       {error && <p className="form-error" role="alert"><CircleAlert size={16} /> {error}</p>}

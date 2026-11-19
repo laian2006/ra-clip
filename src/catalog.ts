@@ -31,7 +31,7 @@ export function tiktokId(raw: string) {
     ? url.pathname.match(/\/video\/(\d{15,25})(?:\/|$)/)?.[1] ?? '' : '';
 }
 
-function linkKey(raw: string) {
+export function linkKey(raw: string) {
   const link = safeLink(raw);
   if (!link) return '';
   const url = new URL(link);

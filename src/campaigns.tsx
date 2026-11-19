@@ -1,7 +1,11 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { ArrowUpRight, CircleAlert, Clapperboard, Download, FolderPlus, Pencil, Upload } from 'lucide-react';
 import type { Campaign, CampaignDraft } from './domain';
 import { Modal } from './ui';
+
+const sizeLabel = (bytes: number) => bytes >= 1024 ** 3
+  ? `${(bytes / 1024 ** 3).toLocaleString('vi-VN', { maximumFractionDigits: 1 })} GB`
+  : `${Math.ceil(bytes / 1024 ** 2).toLocaleString('vi-VN')} MB`;
 
 export function CampaignManager({ items, active, onOpen, onCreate, onRename, onBackup, onRestore, onClose }: {
   items: Campaign[];
@@ -19,6 +23,14 @@ export function CampaignManager({ items, active, onOpen, onCreate, onRename, onB
   const [shop, setShop] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [storage, setStorage] = useState<{ usage: number; quota: number }>();
+  useEffect(() => {
+    let mounted = true;
+    void navigator.storage?.estimate?.().then(({ usage, quota }) => {
+      if (mounted && usage !== undefined && quota && Number.isFinite(quota)) setStorage({ usage, quota });
+    }).catch(() => {});
+    return () => { mounted = false; };
+  }, []);
 
   function edit(item?: Campaign) {
     setEditing(item ?? null);
@@ -49,6 +61,10 @@ export function CampaignManager({ items, active, onOpen, onCreate, onRename, onB
 
   return <Modal title="Quản lý chiến dịch" detail="Mỗi chiến dịch có bảng ưu đãi, kho video và lịch sử riêng." busy={busy} onClose={onClose}>
     <div className="campaign-dialog">
+      {storage && <p className={storage.usage / storage.quota >= 0.85 ? 'form-error' : 'hint-text'}>
+        Bộ nhớ trình duyệt cho Rà Clip dùng khoảng {sizeLabel(storage.usage)} trên {sizeLabel(storage.quota)}.
+        {storage.usage / storage.quota >= 0.85 && ' Dung lượng gần đầy. Sao lưu chiến dịch trước khi thêm video.'}
+      </p>}
       {showForm ? <form className="campaign-form" onSubmit={submit}>
         <div className="form-grid">
           <label>Tên chiến dịch<input value={name} onChange={event => setName(event.target.value)} maxLength={80} required

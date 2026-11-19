@@ -60,6 +60,26 @@ describe('Audit decisions and versions', () => {
     expect(findings[0].evidence?.start).toBe(4.2);
   });
 
+  it('explains missing product data, failed speech, and OCR without an offer separately', () => {
+    const frames: Clip = { ...clip('Sản phẩm màu xanh.'), localMedia: true, evidence: [
+      { start: 0.5, end: null, text: 'Sản phẩm màu xanh.', source: 'frame' },
+    ] };
+    expect(first({ ...frames, sku: 'B' })[0].reason).toContain('chưa có trong bảng');
+    expect(first(frames)[0].reason).toContain('các khung hình đã đọc');
+    expect(first({ ...frames, lastScan: {
+      at, state: 'partial', detail: 'Thử lại lời thoại.', audio: true, frame: true,
+      sources: { audio: { state: 'failed', detail: 'Chưa mở được mô hình lời thoại.' } },
+    } })[0].reason).toContain('Chưa quét xong lời thoại');
+  });
+
+  it('shows an unclear spoken voucher and uses a nearby readable subtitle when available', () => {
+    const item = clip('Còn chín mươi chín nghìn khi áp mã xây chín.');
+    expect(first(item)[0]).toMatchObject({ claim: 'Mã nghe chưa rõ', verdict: 'review', evidence: { start: 4.2 } });
+    item.evidence.push({ start: 5, end: 7, text: 'Áp mã SALE99.', source: 'subtitle' });
+    expect(first(item).map(row => row.claim)).toContain('SALE99');
+    expect(first(item).map(row => row.claim)).not.toContain('Mã nghe chưa rõ');
+  });
+
   it('classifies stated dates separately and handles unknown publication', () => {
     expect(first(clip('Còn 99k với mã SALE99, chỉ ngày 11/11.')).every(row => row.verdict === 'dated')).toBe(true);
     expect(first(clip('Còn 99k với mã SALE99, chỉ hôm nay.', 'clip', 'A', ''))[0].verdict).toBe('review');

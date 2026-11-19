@@ -1,6 +1,6 @@
-import { extractClaims, fold, giftKey } from './claims';
+import { extractClaims, fold, giftKey, unclearSpokenVoucher } from './claims';
 import { displayDate, kindLabels, money, normalizeCode, offerKey } from './domain';
-import type { Audit, Claim, Clip, Finding, Offer, OfferVersion, Verdict } from './domain';
+import type { Audit, Claim, Clip, Evidence, Finding, Offer, OfferVersion, Verdict } from './domain';
 import { parseVietnamTime } from './time';
 
 export function validateOffers(input: Offer[], sourceLines?: number[]): Offer[] {
@@ -56,13 +56,14 @@ export function changedSkus(before: Offer[], after: Offer[]) {
   return new Set(compareOffers(before, after).map(row => row.sku));
 }
 
-function finding(clip: Clip, claim: Claim | null, verdict: Verdict, reason: string, reference = ''): Finding {
+function finding(clip: Clip, claim: Claim | null, verdict: Verdict, reason: string, reference = '', unparsed?: Evidence): Finding {
   const kind = claim?.kind ?? 'coverage';
   const value = claim?.kind === 'price' ? money(Number(claim.value)) : String(claim?.value ?? '');
-  const seed = JSON.stringify([clip.id, kind, value, claim?.code, claim?.evidence.start, verdict, reason, reference]);
+  const evidence = claim?.evidence ?? unparsed;
+  const seed = JSON.stringify([clip.id, kind, value, claim?.code, evidence?.start, verdict, reason, reference]);
   return {
     id: seed, clipId: clip.id, kind, verdict, claim: value || 'Chưa đủ dữ liệu',
-    reason, reference, evidence: claim?.evidence,
+    reason, reference, evidence,
   };
 }
 
@@ -140,14 +141,40 @@ function checkClaim(clip: Clip, claim: Claim, options: Offer[], now: number): Fi
   return finding(clip, claim, 'clear', `${kindLabels[claim.kind]} khớp bảng ưu đãi tại thời điểm rà.`, reference);
 }
 
+export function coverageHelp(clip: Clip, hasSku: boolean) {
+  if (!clip.sku) return { reason: 'Video chưa được gán mã sản phẩm.', action: 'sku' } as const;
+  if (!hasSku) return { reason: 'Mã sản phẩm của video chưa có trong bảng ưu đãi.', action: 'sku' } as const;
+  const hasAudioText = clip.evidence.some(row => row.source !== 'frame');
+  const lastAudio = clip.lastScan?.sources?.audio;
+  if (lastAudio?.state === 'failed' || (!lastAudio && clip.lastScan?.audio && !hasAudioText && clip.lastScan.state !== 'ready')) {
+    return { reason: 'Chưa quét xong lời thoại. Thông tin được nói trong clip có thể chưa được đối chiếu.', action: 'audio' } as const;
+  }
+  if (clip.evidence.length) {
+    const onlyFrames = clip.evidence.every(row => row.source === 'frame');
+    return { reason: onlyFrames ? 'Chưa thấy giá, voucher hoặc quà tặng trong các khung hình đã đọc.'
+      : 'Chưa trích được giá, voucher hoặc quà tặng từ các nguồn đã có.', action: 'segments' } as const;
+  }
+  if (clip.localMedia || clip.demoMedia) return { reason: 'Chưa có đoạn trích để đối chiếu. Kiểm tra các nguồn quét trong video.', action: 'scan' } as const;
+  return { reason: 'Video thiếu file hoặc phụ đề có mốc thời gian.', action: 'edit' } as const;
+}
+
 function scanClip(clip: Clip, offers: Offer[], history: Offer[], now: number) {
   const candidates = offers.filter(row => row.sku === clip.sku);
   const known = history.filter(row => row.sku === clip.sku);
   const claims = extractClaims(clip, known);
+  const unclear = unclearSpokenVoucher(clip, known);
+  if (unclear) {
+    const checkCode = finding(clip, null, 'review', 'Clip nhắc mã ưu đãi nhưng chưa nhận dạng được mã.', '', unclear);
+    return [
+      { ...checkCode, claim: 'Mã nghe chưa rõ' },
+      ...claims.map(claim => checkClaim(clip, claim, candidates, now)),
+    ];
+  }
   if (!claims.length) {
-    const message = clip.evidence.length ? 'Chưa trích được giá, voucher hoặc quà tặng.'
+    const legacyReason = clip.evidence.length ? 'Chưa trích được giá, voucher hoặc quà tặng.'
       : 'Thêm video đã phân tích, phụ đề hoặc ghi chú có mốc thời gian.';
-    return [finding(clip, null, 'review', message)];
+    const result = finding(clip, null, 'review', legacyReason);
+    return [{ ...result, reason: coverageHelp(clip, candidates.length > 0).reason }];
   }
   return claims.map(claim => checkClaim(clip, claim, candidates, now));
 }
@@ -163,7 +190,8 @@ export function runAudit(clips: Clip[], versions: OfferVersion[], checkedAt: str
   const history = versions.flatMap(version => version.offers);
   const refreshed: string[] = [];
   const results = clips.map(clip => {
-    const signature = JSON.stringify([clip.sku, clip.published, clip.evidence]);
+    const signature = JSON.stringify([clip.sku, clip.published, clip.evidence, Boolean(clip.localMedia || clip.demoMedia),
+      clip.lastScan?.audio, clip.lastScan?.state, clip.lastScan?.sources?.audio?.state, 'coverage-v2']);
     const old = previousResults.get(clip.id);
     if (skus && old?.signature === signature && !skus.has(clip.sku)) return old;
     refreshed.push(clip.id);
