@@ -1,6 +1,6 @@
 # Rà Clip
 
-Rà lại video bán hàng sau khi giá, voucher hoặc quà tặng thay đổi. Ứng dụng đọc lời thoại và chữ tiếng Việt trong video, đối chiếu theo mã phân loại sản phẩm (SKU) và chỉ ra đoạn cần xem.
+Kiểm bản nháp trước khi đăng và rà lại video bán hàng khi giá, voucher hoặc quà tặng thay đổi. Rà Clip đọc lời thoại và chữ tiếng Việt, đối chiếu theo mã phân loại sản phẩm (SKU) và chỉ ra đoạn cần xem.
 
 ![Màn hình rà soát với dữ liệu mẫu](docs/giao-dien.png)
 
@@ -31,6 +31,12 @@ Từ màn hình đầu, chọn **Xem một cảnh báo mẫu** để tới đún
 4. Mở **Nhật ký rà** để tải lại báo cáo theo từng lần rà. Nhật ký hiện clip mới cần kiểm tra hoặc đã hết dấu hiệu giữa hai lần rà.
 
 Danh sách 9 tình huống và mốc kiểm tra có trong [kho video mẫu](docs/video-mau.md).
+
+## Chọn công cụ theo việc cần làm
+
+- **KOC và người làm video** mở **Kiểm nhanh bản nháp**, dán kịch bản, nhập phụ đề hoặc thêm file để đọc chữ và lời thoại. Điền ưu đãi shop xác nhận hoặc mở phiếu shop gửi, chọn giờ dự kiến đăng rồi xem lý do, đoạn gốc và tải CSV. Lần kiểm này dùng riêng trên trang Kiểm nhanh.
+- **Chủ shop và vận hành** mở **Lịch đổi ưu đãi** để xem mốc bắt đầu, hết hạn, các clip phát sinh cảnh báo và clip thiếu bằng chứng. Lịch mô phỏng ngay trước và sau mỗi mốc theo phiên bản bảng mới nhất. Trong **Lịch đổi ưu đãi** hoặc **Bảng ưu đãi**, chọn **Tạo phiếu cho KOC** để sao chép hoặc tải thông tin của một SKU và ưu đãi được chọn.
+- **Agency và người quản lý KOC** mở **Điều phối người đăng** để xem số video, dữ liệu còn thiếu và tiến độ theo người đăng trong chiến dịch. Chọn nhiều clip để gán hoặc đổi người đăng cùng lúc, mở danh sách việc đã lọc hoặc soạn tin nhắc cho riêng từng người.
 
 ## Dùng cho đợt sale thật
 

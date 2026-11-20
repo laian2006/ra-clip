@@ -109,7 +109,7 @@ export function unclearSpokenVoucher(clip: Clip, offers: Offer[]) {
     if (segment.source !== 'audio') return false;
     const text = fold(segment.text);
     if (!mentioned.test(text) || negated.test(text)) return false;
-    return !clip.evidence.some(row => Math.abs(row.start - segment.start) <= 4 && readCodes(row.text, offers).length > 0);
+    return !clip.evidence.some(row => !row.untimed && Math.abs(row.start - segment.start) <= 4 && readCodes(row.text, offers).length > 0);
   });
 }
 
@@ -119,7 +119,7 @@ export function extractClaims(clip: Clip, offers: Offer[]) {
   const evidence = [...clip.evidence].sort((a, b) => a.start - b.start);
   for (const segment of evidence) {
     const text = fold(segment.text);
-    const context = evidence.filter(other => Math.abs(other.start - segment.start) <= 4)
+    const context = evidence.filter(other => other.untimed === segment.untimed && Math.abs(other.start - segment.start) <= 4)
       .map(other => other.text).join('\n');
     const codes = readCodes(segment.text, offers);
     const contextCodes = codes.length ? codes : readCodes(context, offers);
@@ -133,7 +133,7 @@ export function extractClaims(clip: Clip, offers: Offer[]) {
     ];
     for (const candidate of candidates) {
       const value = candidate.kind === 'gift' ? giftKey(String(candidate.value)) : candidate.value;
-      const key = JSON.stringify([candidate.kind, value, candidate.code, disclosure, conditional]);
+      const key = JSON.stringify([candidate.kind, value, candidate.code, disclosure, conditional, segment.untimed]);
       if (seen.has(key)) continue;
       seen.add(key);
       claims.push({ ...candidate, disclosure, conditional, evidence: segment });

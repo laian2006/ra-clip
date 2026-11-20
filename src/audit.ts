@@ -60,7 +60,7 @@ function finding(clip: Clip, claim: Claim | null, verdict: Verdict, reason: stri
   const kind = claim?.kind ?? 'coverage';
   const value = claim?.kind === 'price' ? money(Number(claim.value)) : String(claim?.value ?? '');
   const evidence = claim?.evidence ?? unparsed;
-  const seed = JSON.stringify([clip.id, kind, value, claim?.code, evidence?.start, verdict, reason, reference]);
+  const seed = JSON.stringify([clip.id, kind, value, claim?.code, evidence?.untimed ? 'script' : evidence?.start, verdict, reason, reference]);
   return {
     id: seed, clipId: clip.id, kind, verdict, claim: value || 'Chưa đủ dữ liệu',
     reason, reference, evidence,
@@ -198,4 +198,18 @@ export function runAudit(clips: Clip[], versions: OfferVersion[], checkedAt: str
     return { clipId: clip.id, signature, findings: scanClip(clip, current.offers, history, now) };
   });
   return { versionId: current.id, checkedAt, results, refreshed };
+}
+
+export function auditDraft(clip: Clip, offer: Offer, checkedAt: string) {
+  const audit = runAudit([clip], [{ id: 'quick', at: checkedAt, offers: [offer] }], checkedAt);
+  if (!offer.code) return audit;
+  const result = audit.results[0];
+  result.findings = result.findings.map(row => {
+    if (row.verdict !== 'clear' || (row.kind !== 'price' && row.kind !== 'gift')) return row;
+    const hasVoucher = result.findings.some(item => item.kind === 'code' && item.claim === offer.code &&
+      item.evidence?.untimed === row.evidence?.untimed);
+    return hasVoucher ? row : { ...row, id: row.id + ':voucher', verdict: 'review',
+      reason: `${row.kind === 'price' ? 'Mức giá này' : 'Quà này'} áp dụng với mã ${offer.code}. Kiểm tra bản nháp đã nêu mã ở phần nội dung tương ứng.` };
+  });
+  return audit;
 }

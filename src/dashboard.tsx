@@ -105,7 +105,7 @@ export function ClipList({ entries, total, results, filters, onFilter, selected,
   </section>;
 }
 
-function ClipPlayer({ clip, jump }: { clip: Clip; jump: { time: number; tick: number } | null }) {
+export function ClipPlayer({ clip, jump, file }: { clip: Clip; jump: { time: number; tick: number } | null; file?: Blob }) {
   const [url, setUrl] = useState('');
   const [failed, setFailed] = useState(false);
   const [captionFile, setCaptionFile] = useState('');
@@ -148,8 +148,11 @@ function ClipPlayer({ clip, jump }: { clip: Clip; jump: { time: number; tick: nu
     let disposed = false;
     setUrl('');
     setFailed(false);
-    if (fixture) setUrl(`${fixture}.webm`);
-    if (clip.localMedia) {
+    if (file) {
+      objectUrl = URL.createObjectURL(file);
+      setUrl(objectUrl);
+    } else if (fixture) setUrl(`${fixture}.webm`);
+    else if (clip.localMedia) {
       void loadMedia(clip.id).then(blob => {
         if (disposed) return;
         if (blob) { objectUrl = URL.createObjectURL(blob); setUrl(objectUrl); }
@@ -157,7 +160,7 @@ function ClipPlayer({ clip, jump }: { clip: Clip; jump: { time: number; tick: nu
       }).catch(() => { if (!disposed) setFailed(true); });
     }
     return () => { disposed = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [clip.id, fixture, clip.localMedia, clip.mediaRevision]);
+  }, [clip.id, fixture, clip.localMedia, clip.mediaRevision, file]);
 
   function seek(video: HTMLVideoElement) {
     if (jumpTime !== undefined && Number.isFinite(video.duration)) {
@@ -177,7 +180,7 @@ function ClipPlayer({ clip, jump }: { clip: Clip; jump: { time: number; tick: nu
           srcLang="vi" src={trackUrl} onLoad={event => { event.currentTarget.track.mode = captions ? 'showing' : 'hidden'; }} />}
       </video>
       : <div className="player-placeholder"><Film size={26} /><span>{failed ? 'Video không mở được' :
-        (clip.localMedia || clip.demoMedia) ? 'Đang mở video…' : 'Clip chưa có file phát'}</span>
+        (file || clip.localMedia || clip.demoMedia) ? 'Đang mở video…' : 'Clip chưa có file phát'}</span>
         {clip.link && <a href={clip.link} target="_blank" rel="noopener noreferrer"><Link2 size={14} /> Mở bài đăng</a>}
       </div>}
   </div>

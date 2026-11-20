@@ -15,6 +15,7 @@ export interface Evidence {
   text: string;
   source: 'audio' | 'frame' | 'subtitle' | 'manual';
   corrected?: boolean;
+  untimed?: true;
 }
 
 export type MediaSource = Extract<Evidence['source'], 'audio' | 'frame'>;

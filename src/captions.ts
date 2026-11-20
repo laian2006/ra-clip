@@ -9,9 +9,10 @@ function cueTime(seconds: number) {
 }
 
 export function captionsFor(evidence: Evidence[]) {
-  const source = ['subtitle', 'audio', 'manual'].find(source => evidence.some(row => row.source === source && row.text.trim()));
+  const timed = evidence.filter(row => !row.untimed && row.text.trim());
+  const source = ['subtitle', 'audio', 'manual'].find(source => timed.some(row => row.source === source));
   if (!source) return '';
-  const rows = evidence.filter(row => row.source === source && row.text.trim()).sort((a, b) => a.start - b.start);
+  const rows = timed.filter(row => row.source === source).sort((a, b) => a.start - b.start);
   const cues = rows.map((row, index) => {
     const next = rows[index + 1]?.start;
     const end = row.end ?? Math.min(row.start + 3, next !== undefined && next > row.start ? next : Infinity);

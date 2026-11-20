@@ -200,9 +200,9 @@ export function auditCsv(audit: Audit, clips: ClipSummary[], reviews: Record<str
     if (!clip) return [];
     return result.findings.map(finding => [
       clip.title, clip.sku, clip.link, clip.videoId ?? '', clip.creator ?? '', clip.stats?.views ?? null, clip.stats?.orders ?? null,
-      finding.evidence ? timestamp(finding.evidence.start) : '',
+      finding.evidence && !finding.evidence.untimed ? timestamp(finding.evidence.start) : '',
       kindLabels[finding.kind], verdictLabels[finding.verdict], finding.claim,
-      finding.evidence ? sourceLabels[finding.evidence.source] : '', finding.evidence?.text ?? '',
+      finding.evidence?.untimed ? 'Kịch bản' : finding.evidence ? sourceLabels[finding.evidence.source] : '', finding.evidence?.text ?? '',
       finding.reference, finding.reason, reviews[finding.id] ? reviewLabels[reviews[finding.id]] : '', notes[finding.id] ?? '', audit.checkedAt,
     ]);
   });

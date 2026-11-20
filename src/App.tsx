@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDownToLine, ArrowRight, ArrowUpRight, BookOpen, CheckCircle2, ChevronDown, CircleAlert,
-  CircleHelp, Clapperboard, ClipboardList, FileSpreadsheet, Film, FolderOpen, Github, History, LayoutDashboard, LoaderCircle,
-  Plus, ScanLine, ShieldCheck, Upload, X,
+  CalendarClock, CircleHelp, Clapperboard, ClipboardList, FileSpreadsheet, FileText, Film, FolderOpen, Github, History,
+  LayoutDashboard, LoaderCircle, Plus, ScanLine, ShieldCheck, Upload, Wrench, X,
 } from 'lucide-react';
 import { allClipFilters, ClipDetail, ClipList, Metrics, visibleClips } from './dashboard';
 import { CampaignManager } from './campaigns';
@@ -29,14 +29,21 @@ import { latestOfferImpact } from './impact';
 import { OfferImpactDialog, OfferImpactSummary } from './impact-view';
 import { HandoffDialog } from './handoff';
 import { DemoStart, ShopStart } from './start';
+import { CreatorBoard } from './creator-board';
+import { assignCreator } from './creators';
+import { OfferBriefDialog } from './offer-brief-view';
+import { OfferSchedule } from './offer-schedule';
+import { QuickCheck } from './quick-check';
+import { ToolLinks, tools, type ToolPage } from './tool-links';
 import { createCampaign, listCampaigns, loadMedia, loadWorkspace, renameCampaign, saveWorkspace, type MediaChange } from './storage';
 import { Brand, Modal } from './ui';
 
-type Page = 'report' | 'queue' | 'clips' | 'offers' | 'history' | 'guide';
+type Page = 'report' | 'queue' | 'clips' | 'offers' | 'history' | 'guide' | 'tools' | ToolPage;
 type Notice = { text: string; error?: boolean };
 type DeletedVideo = { clip: Clip; blob?: Blob; reviews: Workspace['reviews']; notes: NonNullable<Workspace['notes']> };
 const pages = [
   { id: 'report', label: 'Rà soát', icon: LayoutDashboard },
+  { id: 'tools', label: 'Công cụ', icon: Wrench },
   { id: 'queue', label: 'Việc cần làm', icon: ClipboardList },
   { id: 'clips', label: 'Kho video', icon: Film },
   { id: 'offers', label: 'Bảng ưu đãi', icon: FileSpreadsheet },
@@ -47,6 +54,7 @@ const pages = [
 const title: Record<Page, string> = {
   report: 'Rà soát video sau sale', queue: 'Việc cần làm', clips: 'Kho video',
   offers: 'Bảng ưu đãi', history: 'Nhật ký rà soát', guide: 'Hướng dẫn sử dụng',
+  tools: 'Công cụ', quick: 'Kiểm nhanh bản nháp', schedule: 'Lịch đổi ưu đãi', creators: 'Điều phối người đăng',
 };
 
 const descriptions: Record<Page, string> = {
@@ -56,6 +64,10 @@ const descriptions: Record<Page, string> = {
   offers: 'So sánh giá, voucher, quà tặng và các SKU chịu ảnh hưởng.',
   history: 'Xem lại báo cáo từng lần rà và các clip đổi trạng thái.',
   guide: 'Từ bảng ưu đãi và clip gốc đến báo cáo có bằng chứng.',
+  tools: 'Chọn việc cần làm cho video, ưu đãi hoặc đội người đăng.',
+  quick: 'Kiểm một video hoặc kịch bản theo ưu đãi shop gửi, ngay cả khi bạn chưa tạo chiến dịch.',
+  schedule: 'Xem trước video cần rà ở những mốc bắt đầu hoặc hết hạn của deal.',
+  creators: 'Gán người đăng, theo dõi tiến độ và soạn tin nhắc theo từng người.',
 };
 
 function errorText(error: unknown) {
@@ -95,7 +107,8 @@ export function App() {
   const [duplicateIds, setDuplicateIds] = useState<Set<string>>();
   const [selected, setSelected] = useState('');
   const [date, setDate] = useState('');
-  const [dialog, setDialog] = useState<'clip' | 'offers' | 'delete' | 'campaigns' | 'evidence' | 'catalog' | 'batch' | 'impact' | 'impact-handoff' | null>(null);
+  const [dialog, setDialog] = useState<'clip' | 'offers' | 'delete' | 'campaigns' | 'evidence' | 'catalog' | 'batch' | 'impact' | 'impact-handoff' | 'brief' | null>(null);
+  const [queueCreator, setQueueCreator] = useState<string>();
   const [editing, setEditing] = useState<Clip>();
   const [evidenceIndex, setEvidenceIndex] = useState<number | null>(null);
   const [findingFocus, setFindingFocus] = useState('');
@@ -107,6 +120,7 @@ export function App() {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [deleted, setDeleted] = useState<DeletedVideo>();
   const cancel = useRef<AbortController | null>(null);
+  const sidebar = useRef<HTMLElement>(null);
   const importInput = useRef<HTMLInputElement>(null);
   const writing = useRef(false);
   const opening = useRef(false);
@@ -126,6 +140,7 @@ export function App() {
       setWorkspace(data);
       setDate(data.checkedAt);
       setPage('report');
+      setQueueCreator(undefined);
       setFilter('all');
       setClipFilters(allClipFilters);
       setDuplicateIds(undefined);
@@ -163,6 +178,17 @@ export function App() {
     const timer = setTimeout(() => setDeleted(undefined), 30_000);
     return () => clearTimeout(timer);
   }, [deleted]);
+  const ready = workspace !== null;
+  useEffect(() => {
+    const element = sidebar.current;
+    if (!element) return;
+    const root = document.documentElement;
+    const measure = () => root.style.setProperty('--mobile-scroll-top', `${Math.ceil(element.getBoundingClientRect().height) + 8}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => { observer.disconnect(); root.style.removeProperty('--mobile-scroll-top'); };
+  }, [ready]);
 
   async function persist(next: Workspace, media?: MediaChange[]) {
     if (writing.current) throw Error('Đang lưu thay đổi. Thử lại sau khi lưu xong.');
@@ -186,13 +212,17 @@ export function App() {
 
   function notify(text: string, error = false) { setNotice({ text, error }); }
   function startAdd() { setNotice(null); setEditing(undefined); setDialog('clip'); }
-  function go(next: Page) {
+  function go(next: Page, creator?: string) {
     setPage(next); setFilter('all'); setClipFilters(allClipFilters); setFindingFocus(''); setShowDetail(false);
+    setQueueCreator(creator);
     setDuplicateIds(undefined);
     requestAnimationFrame(() => {
       pageHeading.current?.focus({ preventScroll: true });
       pageHeading.current?.scrollIntoView({ block: 'start' });
     });
+  }
+  function openShop(next: Page) {
+    void open('shop').then(() => go(next)).catch(error => notify(errorText(error), true));
   }
   function focusBoard(id: 'clip-evidence' | 'clip-list-heading') {
     setBoardFocus({ id });
@@ -218,6 +248,12 @@ export function App() {
     setShowDetail(true);
     focusBoard('clip-evidence');
   }
+  function openLibraryClip(clip: Clip) {
+    go('clips');
+    setSelected(clip.id);
+    setShowDetail(true);
+    focusBoard('clip-evidence');
+  }
   function startEvidence(clip: Clip, index: number | null) {
     setEditing(clip); setEvidenceIndex(index); setDialog('evidence');
   }
@@ -236,6 +272,7 @@ export function App() {
   const availableClips = visibleClips(candidates, resultIndex, page === 'report' ? filter : 'all', clipFilters);
   const currentClip = availableClips.find(clip => clip.id === selected) ?? availableClips[0];
   const dateChanged = date !== data.checkedAt;
+  const inTools = page === 'tools' || tools.some(item => item.id === page);
   const found = results.filter(row => leadVerdict(row.findings) === 'action').length;
   const example = data.demo ? queueEntries(data).find(({ clip, finding }) =>
     clip.demoMedia && finding.verdict === 'action' && finding.evidence) : undefined;
@@ -501,6 +538,16 @@ export function App() {
     notify('Đã lưu ghi chú.');
   }
 
+  async function changeCreators(ids: string[], creator?: string) {
+    if (busy || opening.current) throw Error('Chờ thao tác hiện tại trước khi gán người đăng.');
+    setBusy('Đang cập nhật người đăng…');
+    try {
+      const clips = assignCreator(data.clips, ids, creator);
+      await persist({ ...data, clips });
+      notify(creator ? `Đã gán ${ids.length} video cho ${creator}.` : `Đã bỏ gán người đăng cho ${ids.length} video.`);
+    } finally { setBusy(''); }
+  }
+
   async function runReport() {
     if (!version) { go('offers'); notify('Thêm bảng ưu đãi trước khi rà.'); return; }
     try {
@@ -521,7 +568,7 @@ export function App() {
     <a className="skip-link" href="#main-content" onClick={event => {
       event.preventDefault(); document.getElementById('main-content')?.focus();
     }}>Bỏ qua điều hướng</a>
-    <aside className="sidebar" aria-label="Không gian và điều hướng">
+    <aside className="sidebar" ref={sidebar} aria-label="Không gian và điều hướng">
       <div className="sidebar-top"><Brand />
         <div className="workspace-switch">
           <span className="workspace-icon"><Clapperboard size={18} /></span>
@@ -537,11 +584,13 @@ export function App() {
           </label>
         </div>
         <button type="button" className="campaign-picker" onClick={() => setDialog('campaigns')} disabled={!!busy}><FolderOpen size={16} /> Quản lý chiến dịch</button>
-        <nav aria-label="Điều hướng chính">{pages.map(({ id, label, icon: Icon }) =>
-          <button type="button" className={page === id ? 'on' : ''} aria-current={page === id ? 'page' : undefined} key={id} onClick={() => go(id)}>
+        <nav aria-label="Điều hướng chính">{pages.map(({ id, label, icon: Icon }) => {
+          const current = page === id || (id === 'tools' && inTools);
+          return <button type="button" className={current ? 'on' : ''} aria-current={current ? 'page' : undefined} key={id} onClick={() => go(id)}>
             <Icon size={18} /> <span>{label}</span>{id === 'queue' && todo > 0 && <small aria-hidden="true" className="nav-count">{todo}</small>}
-            {page === id && id !== 'queue' && <span className="nav-indicator" />}
-          </button>)}</nav>
+            {current && id !== 'queue' && <span className="nav-indicator" />}
+          </button>;
+        })}</nav>
       </div>
       <div className="sidebar-bottom">
         <div className="privacy-note"><ShieldCheck size={19} /><span><strong>Xử lý trên thiết bị</strong><small>Video lưu trên trình duyệt</small></span></div>
@@ -550,12 +599,13 @@ export function App() {
     </aside>
 
     <main className="main" id="main-content" tabIndex={-1}>
-      <header className="topbar"><div className="breadcrumb"><span>{data.demo ? 'Không gian mẫu' : campaign?.name ?? 'Không gian của shop'}</span><span>/</span><strong>{pages.find(item => item.id === page)?.label}</strong></div>
-        <div className="top-actions">
+      <header className="topbar"><div className="breadcrumb"><span>{data.demo ? 'Không gian mẫu' : campaign?.name ?? 'Không gian của shop'}</span><span>/</span><strong>{pages.find(item => item.id === page)?.label ?? title[page]}</strong></div>
+        {inTools && page !== 'tools' && <button className="button secondary tool-back" type="button" onClick={() => go('tools')}>Về công cụ</button>}
+        {!inTools && <div className="top-actions">
           <button className="button secondary" onClick={exportReport} disabled={!data.audit || !data.clips.length || dateChanged || !!busy}
             aria-describedby={dateChanged ? 'pending-audit' : undefined}><ArrowDownToLine size={17} /> Xuất báo cáo</button>
           <button className={`button ${page === 'report' ? 'secondary' : 'primary'}`} onClick={startAdd} disabled={!!busy}><Plus size={18} /> Thêm video</button>
-        </div>
+        </div>}
       </header>
       <div className="main-content">
         <div className="page-title">
@@ -564,12 +614,15 @@ export function App() {
         </div>
         {page === 'report' && (data.demo
           ? <DemoStart onExample={example ? () => openFinding(example.clip, example.finding) : undefined}
-            onShop={() => void open('shop').then(() => go('report')).catch(error => notify(errorText(error), true))}
+            onShop={() => openShop('report')}
             onGuide={() => go('guide')} busy={!!busy} />
           : <ShopStart version={version} clips={data.clips} hasReport={results.length > 0} busy={!!busy}
             onOffers={() => go('offers')} onAdd={startAdd} onEdit={startEdit}
             onScan={clip => { setEditing(clip); setDialog('batch'); }}
             onResults={() => { setFilter('all'); setClipFilters(allClipFilters); setShowDetail(false); focusBoard('clip-list-heading'); }} />)}
+        {page === 'report' && <section className="report-tool-links" aria-label="Công cụ theo nhu cầu">
+          <ToolLinks onOpen={go} />
+        </section>}
         {busy && !dialog && <div className="inline-status" role="status"><LoaderCircle size={17} className="spin" /> {busy}
           {cancel.current && <button className="text-button" onClick={() => cancel.current?.abort()}>Dừng</button>}
         </div>}
@@ -589,7 +642,7 @@ export function App() {
             </form>
           </section>
         </>}
-        {dateChanged && <div className="date-changed">
+        {dateChanged && (!inTools || page === 'creators') && <div className="date-changed">
           <p id="pending-audit" role="status">Thời điểm mới chưa được áp dụng.
             {data.audit && ` Kết quả hiện tại dùng ngày ${displayDate(data.audit.checkedAt)}.`}
             {page === 'report' && ' Chọn Rà soát ngay để cập nhật trước khi xuất.'}</p>
@@ -620,12 +673,34 @@ export function App() {
             onOffers={() => go('offers')} onScan={(clip, options) => void rescan(clip, options)}
             onBack={() => { setShowDetail(false); focusBoard('clip-list-heading'); }} busy={!!busy} />}
         </div>}
-        {page === 'queue' && <QueueView workspace={data} onOpen={openFinding} onReview={review} onNote={note} busy={!!busy} exportBlocked={dateChanged} />}
+        {page === 'queue' && <>
+          <div className="tool-shortcuts">
+            <button className="button secondary" type="button" onClick={() => go('creators')}>Điều phối người đăng <ArrowRight size={16} /></button>
+          </div>
+          <QueueView key={queueCreator === undefined ? 'all' : `creator:${queueCreator}`} workspace={data} initialCreator={queueCreator} onOpen={openFinding}
+            onReview={review} onNote={note} busy={!!busy} exportBlocked={dateChanged} />
+        </>}
         {page === 'history' && <HistoryView snapshots={data.snapshots ?? []} onReport={() => go('report')} />}
-        {page === 'offers' && <OffersView versions={data.versions} clips={data.clips} onImport={() => importInput.current?.click()}
-          onEdit={() => setDialog('offers')} onNext={!data.demo && !data.clips.length ? () => { go('report'); startAdd(); } : undefined} busy={!!busy}
-          impactSummary={impact && impact.clipCount > 0 ? <OfferImpactSummary impact={impact} onOpen={() => setDialog('impact')} /> : undefined} />}
+        {page === 'offers' && <>
+          {version && <div className="tool-shortcuts">
+            <button className="button secondary" type="button" onClick={() => go('schedule')}><CalendarClock size={16} /> Lịch đổi ưu đãi</button>
+            <button className="button secondary" type="button" disabled={!!busy} onClick={() => setDialog('brief')}><FileText size={16} /> Tạo phiếu cho KOC</button>
+          </div>}
+          <OffersView versions={data.versions} clips={data.clips} onImport={() => importInput.current?.click()}
+            onEdit={() => setDialog('offers')} onNext={!data.demo && !data.clips.length ? () => { go('report'); startAdd(); } : undefined} busy={!!busy}
+            impactSummary={impact && impact.clipCount > 0 ? <OfferImpactSummary impact={impact} onOpen={() => setDialog('impact')} /> : undefined} />
+        </>}
         {page === 'guide' && <Guide onOffers={() => go('offers')} onAdd={startAdd} onReport={() => go('report')} />}
+        {page === 'tools' && <ToolLinks onOpen={go} />}
+        {page === 'quick' && <QuickCheck />}
+        {data.demo && (page === 'schedule' || page === 'creators') && <div className="tool-demo-note">
+          <span>Đang xem dữ liệu minh họa.</span>
+          <button type="button" className="button secondary" onClick={() => openShop(page)} disabled={!!busy}>Dùng dữ liệu của bạn <ArrowRight size={16} /></button>
+        </div>}
+        {page === 'schedule' && <OfferSchedule key={active} workspace={data} busy={!!busy} onOffers={() => go('offers')}
+          onLibrary={() => go('clips')} onClip={openLibraryClip} />}
+        {page === 'creators' && <CreatorBoard key={active} workspace={data} busy={!!busy} pendingDate={dateChanged}
+          onLibrary={() => go('clips')} onQueue={name => go('queue', name)} onAssign={changeCreators} />}
       </div>
     </main>
     <input ref={importInput} type="file" className="sr-only" tabIndex={-1} accept=".xlsx,.csv,.tsv"
@@ -644,6 +719,8 @@ export function App() {
     {dialog === 'evidence' && <EvidenceDialog row={evidenceIndex === null ? undefined : editing?.evidence[evidenceIndex]}
       onSave={saveEvidence} onClose={clearDialog} />}
     {dialog === 'offers' && <OfferDialog offers={version?.offers ?? []} onClose={clearDialog} onSave={newOffers} />}
+    {dialog === 'brief' && version?.offers.length ? <OfferBriefDialog offers={version.offers} version={data.versions.length}
+      onClose={clearDialog} /> : null}
     {dialog === 'impact' && impact && <OfferImpactDialog impact={impact} onClose={clearDialog}
       onOpen={(clip, finding) => { clearDialog(); openFinding(clip, finding); }}
       onHandoff={() => setDialog('impact-handoff')} blockHandoff={dateChanged} />}

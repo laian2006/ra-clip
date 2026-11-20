@@ -18,8 +18,9 @@ const filters: { value: QueueFilter; label: string }[] = [
   { value: 'wrong', label: 'Báo nhầm' }, { value: 'all', label: 'Tất cả' },
 ];
 
-export function QueueView({ workspace, busy, exportBlocked, onReview, onNote, onOpen }: {
+export function QueueView({ workspace, busy, exportBlocked, initialCreator, onReview, onNote, onOpen }: {
   workspace: Workspace; busy: boolean; exportBlocked: boolean;
+  initialCreator?: string;
   onReview: (ids: string[], value: Review | '') => Promise<boolean>;
   onNote: (id: string, note: string) => Promise<void>;
   onOpen: (clip: Clip, finding: Finding) => void;
@@ -27,9 +28,10 @@ export function QueueView({ workspace, busy, exportBlocked, onReview, onNote, on
   const entries = useMemo(() => queueEntries(workspace), [workspace]);
   const knownSkus = new Set(workspace.versions.at(-1)?.offers.map(offer => offer.sku));
   const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState<QueueFilter>('open');
+  const [filter, setFilter] = useState<QueueFilter>(() => initialCreator !== undefined &&
+    !entries.some(row => (row.clip.creator?.trim() ?? '') === initialCreator && reviewOpen(row.review)) ? 'all' : 'open');
   const [sort, setSort] = useState<QueueSort>('severity');
-  const [creator, setCreator] = useState('');
+  const [creator, setCreator] = useState(initialCreator === undefined ? '' : `creator:${initialCreator}`);
   const [share, setShare] = useState(false);
   const [selection, setSelection] = useState<Set<string>>(() => new Set());
   const [noteFor, setNoteFor] = useState<string>();
