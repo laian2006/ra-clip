@@ -5,6 +5,7 @@ import { completeScan, failScan } from './batch';
 import { ClipPlayer } from './dashboard';
 import { displayDateTime, localTime } from './domain';
 import type { Audit, Clip, Evidence, Offer } from './domain';
+import { filteredSpeech } from './evidence-quality';
 import { auditCsv, download, readPrice, readSubtitles } from './files';
 import { analyzeVideo, validateVideo, videoMetadata, type ScanOptions } from './media';
 import { readOfferBrief } from './offer-brief';
@@ -43,6 +44,7 @@ export function QuickCheck() {
   const active = useRef<AbortController | null>(null);
   const resultTitle = useRef<HTMLHeadingElement>(null);
   const videoInput = useRef<HTMLInputElement>(null);
+  const subtitleInput = useRef<HTMLTextAreaElement>(null);
   const running = reading || !!progress;
   const cachedScan = useRef<{ video: File; audio: boolean; frame: boolean; value: Awaited<ReturnType<typeof analyzeVideo>> }>(undefined);
 
@@ -188,7 +190,7 @@ export function QuickCheck() {
             <small>Đọc lời thoại lần đầu cần tải mô hình khoảng 80 MB.</small>
           </div>}
           <label className="stack-field">Kịch bản hoặc phụ đề
-            <textarea rows={6} maxLength={80_000} value={subtitles} placeholder="00:05 Còn 129k khi áp mã COMBO129."
+            <textarea ref={subtitleInput} rows={6} maxLength={80_000} value={subtitles} placeholder="00:05 Còn 129k khi áp mã COMBO129."
               onChange={event => { resetResult(); setSubSource('manual'); setSubtitles(event.target.value); }} />
           </label>
           <div className="tool-upload">
@@ -251,6 +253,10 @@ export function QuickCheck() {
         {result.playable && <ClipPlayer clip={result.clip} jump={jump} file={video} />}
         <div>
           {result.clip.lastScan?.detail && <p className="hint-text quick-scan-detail">{result.clip.lastScan.detail}</p>}
+          {filteredSpeech(result.clip) && <div className="scan-guidance">
+            <p>{filteredSpeech(result.clip)}</p>
+            <button type="button" className="text-button" onClick={() => subtitleInput.current?.focus()}>Thêm phụ đề hoặc lời thoại</button>
+          </div>}
           <ToolFindings findings={findings} onEvidence={result.playable ? row => {
             if (row.evidence) setJump(current => ({ time: row.evidence!.start, tick: (current?.tick ?? 0) + 1 }));
           } : undefined} />

@@ -286,8 +286,13 @@ async function readFrames(video: HTMLVideoElement, progress: (message: string) =
 }
 
 export interface ScanOptions { audio: boolean; frame: boolean }
+interface ScanAnalysis {
+  evidence: Evidence[];
+  sources: Partial<Record<MediaSource, ScanSource>>;
+  duration?: number;
+}
 
-export async function analyzeVideo(blob: Blob, options: ScanOptions, progress: (message: string) => void, signal: AbortSignal) {
+export async function analyzeVideo(blob: Blob, options: ScanOptions, progress: (message: string) => void, signal: AbortSignal): Promise<ScanAnalysis> {
   const { video, release } = await videoMetadata(blob, signal);
   const evidence: Evidence[] = [];
   const sources: Partial<Record<MediaSource, ScanSource>> = {};
@@ -324,7 +329,7 @@ export async function analyzeVideo(blob: Blob, options: ScanOptions, progress: (
         sources.frame = { state: 'failed', detail: 'Chưa quét xong khung hình. Thử lại hoặc dùng phụ đề SRT/VTT.' };
       }
     }
-    return { evidence: evidence.sort((a, b) => a.start - b.start), sources };
+    return { evidence: evidence.sort((a, b) => a.start - b.start), sources, duration: video.duration };
   } finally {
     release();
   }

@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { AlertCircle, Check, CircleHelp, Clock4, FileVideo, ScanLine, X } from 'lucide-react';
+import { version } from '../package.json';
 import { kindLabels, timestamp, verdictLabels } from './domain';
 import type { Clip, Finding, Verdict } from './domain';
 import { demoAsset } from './demo';
@@ -7,7 +8,8 @@ import { demoAsset } from './demo';
 export const verdictIcons = { action: AlertCircle, review: CircleHelp, dated: Clock4, clear: Check };
 
 export function Brand() {
-  return <div className="brand"><div className="brand-mark"><ScanLine size={23} strokeWidth={2.15} /></div><span>Rà Clip</span></div>;
+  return <div className="brand"><div className="brand-mark"><ScanLine size={23} strokeWidth={2.15} /></div>
+    <span>Rà Clip<small className="brand-version">v{version}</small></span></div>;
 }
 
 export function Tag({ verdict }: { verdict: Verdict }) {

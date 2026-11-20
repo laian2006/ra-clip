@@ -1,5 +1,7 @@
 # Rà Clip 1.5.1
 
+> Kiểm thử lại bằng file Merzy gốc xác nhận FIX-11 vẫn xảy ra trong bản 1.5.1. Xem nguyên nhân và kết quả nghiệm thu trong [ghi chú 1.5.2](ban-phat-hanh-1.5.2.md).
+
 ## Độ tin cậy của cảnh báo
 
 - **FIX-11 · Đã sửa đối chiếu.** “Mua một tặng một” và “Mua 1 tặng 1” khớp nhau. “Mua 2 tặng 1” và “Mua một tặng hai” vẫn báo khác bảng. Quà thông thường như “một lõi thay” vẫn đối chiếu được với “lõi thay”. Chiến dịch cũ được tính lại theo quy tắc mới khi mở.

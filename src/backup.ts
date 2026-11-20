@@ -173,6 +173,7 @@ export async function readBackup(blob: Blob): Promise<{ draft: CampaignDraft; wo
       ...clipBasics(row), published: date(row.published, true),
       format: row.format ? oneOf<ClipFormat>(row.format, Object.keys(clipFormats) as ClipFormat[]) : undefined,
       localMedia: row.localMedia === true, mediaRevision: crypto.randomUUID(),
+      duration: row.duration === undefined ? undefined : numeric(row.duration, 120),
       lastScan: row.lastScan ? readScan(row.lastScan) : undefined,
       evidence: array(row.evidence, 1500).map(readEvidence),
       masks: array(row.masks ?? [], 2000).map(readMask),

@@ -9,6 +9,17 @@ export interface BatchEvent {
   id: string;
   state: ScanReceipt['state'] | 'running' | 'stopped';
   detail: string;
+  duration?: number;
+}
+
+export type BatchMode = 'audio' | 'frame' | 'both';
+
+export function scanTimeRange(clips: Clip[], mode: BatchMode, rate?: number) {
+  const unknown = clips.filter(clip => !clip.duration).length;
+  const duration = clips.reduce((seconds, clip) => seconds + (clip.duration || 60), 0);
+  const defaultRate: Record<BatchMode, number> = { audio: 0.7, frame: 0.5, both: 1 };
+  const expected = duration * (rate ?? defaultRate[mode]);
+  return { low: Math.max(1, Math.round(expected * 0.5)), high: Math.max(2, Math.ceil(expected * 2)), unknown };
 }
 
 export function needsScan(clip: Clip, options?: ScanOptions) {
@@ -34,7 +45,7 @@ export function completeScan(clip: Clip, options: ScanOptions, result: Awaited<R
   const receipt = scanReceipt(options, result);
   const oldEvidence = clip.evidence.filter(row => row.corrected || (row.source !== 'audio' && row.source !== 'frame') ||
     !result.sources[row.source] || result.sources[row.source]?.state === 'failed');
-  return { ...mergeScan({ ...clip, evidence: oldEvidence }, result.evidence), lastScan: {
+  return { ...mergeScan({ ...clip, evidence: oldEvidence }, result.evidence), duration: result.duration ?? clip.duration, lastScan: {
     ...receipt, sources: { ...clip.lastScan?.sources, ...receipt.sources },
   } };
 }

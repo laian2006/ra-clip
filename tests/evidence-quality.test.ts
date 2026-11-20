@@ -20,6 +20,9 @@ describe('buy-and-get gifts', () => {
   it.each([
     ['Giá 140k, mua một tặng một.', 'Mua 1 tặng 1', 'clear'],
     ['Chưa tới một trăm bốn mươi, mua một tặng một nha.', 'Mua 1 tặng 1', 'clear'],
+    ['Chưa tới một trăm bốn mươi nghìn cành lại còn mua một tặng một nhanh tay trốt đơn kéo lố mấy bà ơi.',
+      'Mua 1 tặng 1', 'clear'],
+    ['Lại còn mua một tặng một nhanh tay trót đơn kẻo lỡ mấy bà ơi.', 'Mua 1 tặng 1', 'clear'],
     ['Mua 2 tặng 1.', 'Mua 1 tặng 1', 'action'],
     ['Mua một tặng hai.', 'Mua 1 tặng 1', 'action'],
     ['Tặng kèm một lõi thay.', 'lõi thay', 'clear'],
@@ -28,6 +31,29 @@ describe('buy-and-get gifts', () => {
     const { findings } = runAudit([{ ...clip, evidence: [audio(text)] }], [specific], at).results[0];
     expect(findings.filter(row => row.kind === 'gift')).toMatchObject([{ verdict }]);
     if (verdict === 'clear') expect(findings.every(row => row.verdict === 'clear')).toBe(true);
+  });
+
+  it('joins adjacent speech chunks and keeps the actual words as evidence', () => {
+    const earlier = { ...audio('Lại còn mua một', 8), end: 10 };
+    const later = audio('tặng một nhanh tay chốt đơn.', 10.1);
+    const { findings } = runAudit([{ ...clip, evidence: [earlier, later] }], [version], at).results[0];
+    expect(findings).toMatchObject([{ kind: 'gift', verdict: 'clear', claim: 'Mua 1 tặng 1',
+      evidence: { start: 8, text: 'Lại còn mua một\ntặng một nhanh tay chốt đơn.' } }]);
+  });
+
+  it('uses verification instead of a false mismatch when only the gift fragment is known', () => {
+    for (const text of ['Tặng một nhanh tay chốt đơn.', 'Mua một tặng một trăm nghìn.']) {
+      const { findings } = runAudit([{ ...clip, evidence: [audio(text)] }], [version], at).results[0];
+      expect(findings.every(finding => finding.verdict === 'review')).toBe(true);
+    }
+  });
+
+  it('checks the named item when the offer includes one along with the gift ratio', () => {
+    const qualified = { ...version, offers: [{ ...version.offers[0], gift: 'Mua 1 tặng 1 lõi thay' }] };
+    expect(runAudit([{ ...clip, evidence: [audio('Mua một tặng một lõi thay, chốt đơn ngay.')] }], [qualified], at)
+      .results[0].findings[0].verdict).toBe('clear');
+    expect(runAudit([{ ...clip, evidence: [audio('Mua một tặng một bình mới, chốt đơn ngay.')] }], [qualified], at)
+      .results[0].findings[0].verdict).toBe('review');
   });
 });
 
@@ -48,6 +74,14 @@ describe('machine evidence filters', () => {
       { text: 'SALE99', confidence: 94 }, { text: '1 4 ##l', confidence: 85 },
       { text: 'Giá 140.000đ', confidence: 42 }, { text: 'Tặng một lõi thay', confidence: 82 },
     ])).toEqual({ text: 'SALE99\nTặng một lõi thay', discarded: 2 });
+  });
+
+  it('drops isolated OCR fragments from the real reports even at high confidence', () => {
+    expect(screenOcrLines([
+      ...['is', 'ay Bi ii', 'Z2', 'M13)', 'Fox', 'Sị'].map(text => ({ text, confidence: 94 })),
+      { text: 'Mã Z2', confidence: 92 }, { text: '129K', confidence: 68 },
+      { text: 'Sulwhasoo First Care Activating', confidence: 91 },
+    ])).toEqual({ text: 'Mã Z2\n129K\nSulwhasoo First Care Activating', discarded: 6 });
   });
 
   it('clears old unusable audio on a completed empty scan while preserving corrections', () => {

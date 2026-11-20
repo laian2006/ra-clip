@@ -81,6 +81,8 @@
   .brand { display: flex; gap: 10px; align-items: center; font-size: 23px; font-weight: 800; letter-spacing: -.06em; white-space: nowrap; }
   .sidebar .brand { margin: 0 9px 32px; }
   .brand-mark { display: grid; place-items: center; width: 35px; height: 35px; color: #231e18; background: #f2ae88; border-radius: 10px; }
+  .brand-version { display: block; color: var(--muted); font-size: 10px; letter-spacing: normal; line-height: 1.2; font-weight: 600; }
+  .sidebar .brand-version { color: #bccbbb; }
   .workspace-switch { position: relative; background: #282e27; display: flex; align-items: center; gap: 9px; padding: 9px 8px; border-radius: 9px; border: 1px solid #3b4339; margin-bottom: 27px; min-width: 0; }
   .workspace-icon { width: 32px; height: 32px; display: grid; place-items: center; color: #e2bfaa; background: #3e3b32; border-radius: 7px; flex: none; }
   .workspace-switch strong { display: block; font-size: 11px; }
@@ -611,10 +613,12 @@
   .campaign-storage { display: grid; gap: 6px; padding: 9px; border: 1px solid var(--line); border-radius: 8px; }
   .campaign-storage h3 { font-size: 13px; }
   .campaign-storage meter { width: 100%; }
-  .offer-warnings, .history-rules { padding: 9px; background: var(--review-bg); color: #684a1c;
+  .offer-warnings, .history-rules, .scan-guidance { padding: 9px; background: var(--review-bg); color: #684a1c;
     border-radius: 8px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
   .offer-warnings ul { display: grid; gap: 4px; margin-block: 6px; padding-left: 16px; }
   .batch-current { overflow-wrap: anywhere; }
+  .scan-guidance { margin-bottom: 8px; }
+  .scan-guidance .text-button { margin-top: 3px; white-space: normal; text-align: left; }
   .mobile-clip-link.button { display: none; }
   .tool-demo-note { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px;
     margin-bottom: 12px; padding: 8px 10px; background: #efeee6; border-radius: 8px; color: var(--muted); font-size: 12px; }

@@ -14,8 +14,9 @@ export interface DraftClip {
   creator?: string; stats?: VideoStats; evidence: Evidence[]; file: File | null;
 }
 
-export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel, onOpen }: {
+export function ClipDialog({ clip, focusSubtitles, skus, onSave, onClose, busy, onCancel, onOpen }: {
   clip?: Clip;
+  focusSubtitles?: boolean;
   skus: string[];
   onSave: (drafts: DraftClip[], scan: ScanOptions, choice: DuplicateChoice) => Promise<void>;
   onOpen: (clip: Clip) => void;
@@ -51,6 +52,11 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel, onOpen
   const working = busy || (loadingModel ? 'Đang chuẩn bị mô hình lời thoại…' : '');
   useEffect(() => () => modelTask.current?.abort(), []);
   useEffect(() => { if (conflict && !busy) duplicateAction.current?.focus(); }, [conflict, busy]);
+  useEffect(() => {
+    if (!focusSubtitles) return;
+    const frame = requestAnimationFrame(() => subtitleInput.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [focusSubtitles]);
 
   async function warmModel() {
     if (loadingModel || modelTask.current) return;

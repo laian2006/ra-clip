@@ -36,6 +36,8 @@ test('batch scan saves each clip independently and can be stopped', async ({ pag
   await dialog.getByRole('checkbox', { name: /Bình giữ nhiệt/ }).check();
   await dialog.getByRole('checkbox', { name: /Quạt cầm tay/ }).check();
   await dialog.getByLabel('Nguồn phân tích').selectOption('frame');
+  await expect(dialog.getByText('Ước lượng trước quét', { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/2 video chưa biết thời lượng/)).toBeVisible();
   await dialog.getByRole('button', { name: 'Quét 2 video' }).click();
   await expect(dialog.getByText(/Đã chạy \d+ giây/)).toBeVisible();
   await expect(dialog.getByText('Đã hoàn tất 1/2 video trong lượt này')).toBeVisible({ timeout: 40_000 });

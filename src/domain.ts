@@ -68,6 +68,7 @@ export interface Clip {
   format?: ClipFormat;
   evidence: Evidence[];
   localMedia: boolean;
+  duration?: number;
   demoMedia?: boolean | string;
   mediaRevision?: string;
   fileHash?: string;

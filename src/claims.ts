@@ -1,4 +1,4 @@
-import type { Claim, Clip, Offer } from './domain';
+import type { Claim, Clip, Evidence, Offer } from './domain';
 import { normalizeCode } from './domain';
 
 export const fold = (value: string) =>
@@ -30,7 +30,7 @@ function spokenNumber(text: string): number | null {
 }
 
 function isComparisonPrice(prefix: string) {
-  return /\b(?:giam|tiet\s+kiem|voucher(?:\s+giam)?|giam\s+them|chiet\s+khau|gia\s+goc|gia\s+niem\s+yet|(?:hoa\s+)?don(?:\s+hang)?\s+(?:tu|tren|toi\s+thieu)|chi\s+tieu\s+(?:tu|toi\s+thieu))\s*[:=]?\s*$/.test(prefix);
+  return /\b(?:giam|tang(?:\s+(?:them|kem|ngay))?|tiet\s+kiem|voucher(?:\s+giam)?|giam\s+them|chiet\s+khau|gia\s+goc|gia\s+niem\s+yet|(?:hoa\s+)?don(?:\s+hang)?\s+(?:tu|tren|toi\s+thieu)|chi\s+tieu\s+(?:tu|toi\s+thieu))\s*[:=]?\s*$/.test(prefix);
 }
 
 function prices(text: string): number[] {
@@ -76,9 +76,9 @@ function purchaseGifts(value: string) {
   return [...value.matchAll(buyGift)].flatMap(match => {
     const start = match.index!;
     const end = start + match[0].length;
-    const rawTail = value.slice(end).split(/[\r\n.,!?;:]/, 1)[0].trim();
-    const tail = rawTail.replace(/^(?:cai|chiec|san\s+pham)\b\s*/, '');
-    if (tail && !/^(?:khi|neu|cho|trong|den|nha|nhe|luon|day|do|a|va|roi|tiep)\b/.test(tail)) return [];
+    // Match the quantities independently of how the speaker continues the sentence.
+    // A money unit immediately after the gift amount is a different kind of offer.
+    if (/^(?:[.,]\d|\s*(?:k|nghin|ngan|trieu|tr|dong|vnd|d)\b|\s*%)/.test(value.slice(end))) return [];
     const count = (text: string) => /^\d+$/.test(text) ? Number(text) : spokenNumber(text.replace(/\s+/g, ' '));
     const buy = count(match[1]);
     const gift = count(match[2]);
@@ -94,19 +94,46 @@ export function giftKey(value: string) {
   return purchase?.start === 0 && !purchase.negated ? purchase.key : namedGiftKey(text);
 }
 
-function giftClaims(text: string) {
-  const normalized = text.normalize('NFC');
-  const purchases = purchaseGifts(fold(normalized));
+export function compareGift(value: string, expected: string, evidence: string) {
+  const claimKey = giftKey(value);
+  const expectedKey = giftKey(expected);
+  const claimIsRatio = claimKey.startsWith('mua:');
+  const expectedIsRatio = expectedKey.startsWith('mua:');
+  if (expectedKey && claimIsRatio !== expectedIsRatio) return 'unclear';
+  if (claimKey !== expectedKey) return 'different';
+  if (expectedIsRatio) {
+    const expectedText = fold(expected.normalize('NFC')).trim();
+    const offer = purchaseGifts(expectedText)[0];
+    const qualifier = expectedText.slice(offer.end).replace(/^[\s,.:;–—-]+|[\s,.:;–—-]+$/g, '');
+    const transcript = fold(evidence.normalize('NFC'));
+    if (qualifier && !purchaseGifts(transcript).some(promo => {
+      if (promo.negated || promo.key !== expectedKey) return false;
+      const suffix = transcript.slice(promo.end).replace(/^[\s,.:;–—-]+/, '');
+      return suffix.startsWith(qualifier) && !/^\p{L}/u.test(suffix.slice(qualifier.length));
+    })) return 'unclear';
+  }
+  return 'match';
+}
+
+function giftClaims(segment: Evidence, previous?: Evidence) {
+  const normalized = segment.text.normalize('NFC');
+  const prefix = previous ? previous.text.normalize('NFC') + '\n' : '';
+  const purchases = purchaseGifts(fold(prefix + normalized)).filter(promo => promo.end > prefix.length);
   let rest = normalized;
-  for (const { start, end } of [...purchases].reverse()) rest = rest.slice(0, start) + ' ' + rest.slice(end);
+  for (const { start, end } of [...purchases].reverse()) {
+    rest = rest.slice(0, Math.max(0, start - prefix.length)) + ' ' + rest.slice(end - prefix.length);
+  }
   const gifts = purchases.filter(promo => !promo.negated).map(promo => ({
     value: promo.text, conditional: conditionPattern.test(fold(rest)),
+    evidence: previous && promo.start < prefix.length
+      ? { ...segment, start: previous.start, text: prefix + normalized, corrected: undefined }
+      : segment,
   }));
   const pattern = /\btặng\s+(?:(?:kèm|thêm|ngay)\s+)?([^\n.!?;,:]+?)(?=\s+(?:khi|nếu|cho|trong\s+ngày|đến\s+hết)\b|[\n.!?;,:]|$)/giu;
   for (const match of rest.matchAll(pattern)) {
     const value = match[1].trim();
     if (value && giftKey(value) && !/^(?:từ|giá|voucher|mã|[\d.,]+\s*(?:k|nghìn|ngàn|đồng|%))/i.test(value)) {
-      gifts.push({ value, conditional: conditionPattern.test(fold(normalized)) });
+      gifts.push({ value, conditional: conditionPattern.test(fold(normalized)), evidence: segment });
     }
   }
   return gifts;
@@ -151,7 +178,12 @@ export function extractClaims(clip: Clip, offers: Offer[]) {
   const claims: Claim[] = [];
   const seen = new Set<string>();
   const evidence = [...clip.evidence].sort((a, b) => a.start - b.start);
+  const lastBySource = new Map<Evidence['source'], Evidence>();
   for (const segment of evidence) {
+    const prior = lastBySource.get(segment.source);
+    lastBySource.set(segment.source, segment);
+    const adjacent = prior && segment.source !== 'frame' && !segment.untimed && !prior.untimed &&
+      segment.start > prior.start && Math.abs(segment.start - (prior.end ?? prior.start)) <= 3 ? prior : undefined;
     const text = fold(segment.text);
     const context = evidence.filter(other => other.untimed === segment.untimed && Math.abs(other.start - segment.start) <= 4)
       .map(other => other.text).join('\n');
@@ -160,17 +192,18 @@ export function extractClaims(clip: Clip, offers: Offer[]) {
     const code = contextCodes.length === 1 ? contextCodes[0] : '';
     const disclosure = readDisclosure(text, clip.published) || readDisclosure(fold(context), clip.published);
     const conditional = conditionPattern.test(text);
-    const candidates: Array<Pick<Claim, 'kind' | 'value' | 'code' | 'conditional'>> = [
-      ...codes.map(value => ({ kind: 'code' as const, value, code: value, conditional })),
-      ...prices(fold(segment.text.normalize('NFC').replace(/\bngăn\b/gi, 'khoang'))).map(value => ({ kind: 'price' as const, value, code, conditional })),
-      ...giftClaims(segment.text).map(gift => ({ ...gift, kind: 'gift' as const, code })),
+    const candidates: Array<Pick<Claim, 'kind' | 'value' | 'code' | 'conditional' | 'evidence'>> = [
+      ...codes.map(value => ({ kind: 'code' as const, value, code: value, conditional, evidence: segment })),
+      ...prices(fold(segment.text.normalize('NFC').replace(/\bngăn\b/gi, 'khoang'))).map(value =>
+        ({ kind: 'price' as const, value, code, conditional, evidence: segment })),
+      ...giftClaims(segment, adjacent).map(gift => ({ ...gift, kind: 'gift' as const, code })),
     ];
     for (const candidate of candidates) {
       const value = candidate.kind === 'gift' ? giftKey(String(candidate.value)) : candidate.value;
       const key = JSON.stringify([candidate.kind, value, candidate.code, disclosure, candidate.conditional, segment.untimed]);
       if (seen.has(key)) continue;
       seen.add(key);
-      claims.push({ ...candidate, disclosure, evidence: segment });
+      claims.push({ ...candidate, disclosure });
     }
   }
   return claims;

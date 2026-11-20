@@ -112,6 +112,7 @@ export function App() {
   const [offerImport, setOfferImport] = useState<{ offers: Offer[]; warnings: string[] }>();
   const [queueCreator, setQueueCreator] = useState<string>();
   const [editing, setEditing] = useState<Clip>();
+  const [focusSubtitles, setFocusSubtitles] = useState(false);
   const [evidenceIndex, setEvidenceIndex] = useState<number | null>(null);
   const [findingFocus, setFindingFocus] = useState('');
   const [showDetail, setShowDetail] = useState(false);
@@ -213,7 +214,7 @@ export function App() {
   }
 
   function notify(text: string, error = false) { setNotice({ text, error }); }
-  function startAdd() { setNotice(null); setEditing(undefined); setDialog('clip'); }
+  function startAdd() { setNotice(null); setEditing(undefined); setFocusSubtitles(false); setDialog('clip'); }
   function go(next: Page, creator?: string) {
     setPage(next); setFilter('all'); setClipFilters(allClipFilters); setFindingFocus(''); setShowDetail(false);
     setQueueCreator(creator);
@@ -259,7 +260,9 @@ export function App() {
   function startEvidence(clip: Clip, index: number | null) {
     setEditing(clip); setEvidenceIndex(index); setDialog('evidence');
   }
-  function startEdit(clip: Clip) { setNotice(null); setEditing(clip); setDialog('clip'); }
+  function startEdit(clip: Clip, subtitles = false) {
+    setNotice(null); setEditing(clip); setFocusSubtitles(subtitles); setDialog('clip');
+  }
   function startDelete(clip: Clip) { setEditing(clip); setDialog('delete'); }
   function clearDialog() { setDialog(null); setEditing(undefined); setOfferImport(undefined); }
 
@@ -389,7 +392,7 @@ export function App() {
       for (const refreshed of current.audit?.refreshed ?? []) processed.add(refreshed);
       if (receipt.state === 'ready') success++;
       else warnings++;
-      onEvent({ id, state: receipt.state, detail: receipt.detail });
+      onEvent({ id, state: receipt.state, detail: receipt.detail, duration: next.duration });
     }
     if (current.audit && success + warnings > 0) {
       await persist(recordAudit({ ...current, audit: { ...current.audit, refreshed: [...processed] } }, 'batch'));
@@ -415,6 +418,7 @@ export function App() {
         const id = original?.id ?? crypto.randomUUID();
         let evidence = original?.evidence ?? [];
         let lastScan = draft.file ? undefined : original?.lastScan;
+        let duration = original?.duration;
         if (draft.evidence.length) evidence = evidence.filter(row => row.source === 'audio' || row.source === 'frame');
         if (draft.file) {
           const file = draft.file;
@@ -424,10 +428,13 @@ export function App() {
               setBusy(`${index + 1}/${drafts.length} · ${message}`), controller.signal);
             evidence = [...evidence, ...result.evidence];
             lastScan = scanReceipt(options, result);
+            duration = result.duration;
             if (lastScan.state !== 'ready') warnings++;
           } else {
             setBusy(`${index + 1}/${drafts.length} · Kiểm tra video…`);
-            (await videoMetadata(file, controller.signal)).release();
+            const metadata = await videoMetadata(file, controller.signal);
+            duration = metadata.video.duration;
+            metadata.release();
           }
           media.push({ id, blob: file });
         }
@@ -438,7 +445,7 @@ export function App() {
           format: choice.replace ? choice.replace.format : draft.format,
           videoId: choice.replace ? choice.replace.videoId : draft.link !== editing?.link ? tiktokId(draft.link) || undefined : editing?.videoId,
           creator: choice.replace ? choice.replace.creator : draft.creator,
-          stats: choice.replace ? choice.replace.stats : draft.stats, lastScan,
+          stats: choice.replace ? choice.replace.stats : draft.stats, lastScan, duration,
           evidence: [...evidence, ...draft.evidence].sort((a, b) => a.start - b.start),
           localMedia: Boolean(draft.file || original?.localMedia),
           demoMedia: draft.file ? undefined : original?.demoMedia,
@@ -453,7 +460,7 @@ export function App() {
       cancel.current = null;
       await persist(updatedReport({ ...data, clips }, 'clips'), media);
       setSelected(rows[0].id);
-      setShowDetail(false);
+      setShowDetail(Boolean(editing) && showDetail);
       setFilter('all');
       if (!editing) setClipFilters(allClipFilters);
       if (page !== 'report') setPage('clips');
@@ -723,7 +730,7 @@ export function App() {
         event.target.value = '';
         if (file) void handleImport(file);
       }} />
-    {dialog === 'clip' && <ClipDialog clip={editing} skus={[...new Set(version?.offers.map(row => row.sku) ?? [])]}
+    {dialog === 'clip' && <ClipDialog clip={editing} focusSubtitles={focusSubtitles} skus={[...new Set(version?.offers.map(row => row.sku) ?? [])]}
       onClose={clearDialog} onSave={saveClips} busy={busy} onCancel={() => cancel.current?.abort()}
       onOpen={clip => { clearDialog(); setClipFilters(allClipFilters); setFilter('all'); selectClip(clip.id); }} />}
     {dialog === 'catalog' && <CatalogDialog clips={data.clips} onApply={importCatalog} onClose={clearDialog} />}

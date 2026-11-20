@@ -1,4 +1,5 @@
 import type { Clip, Evidence, MediaSource, ScanReceipt, ScanSource } from './domain';
+import { fold } from './claims';
 
 export function hasSpeechLoop(text: string) {
   const words = text.normalize('NFC').toLocaleLowerCase('vi').match(/[\p{L}\p{N}]+/gu) ?? [];
@@ -18,13 +19,23 @@ export function hasSpeechLoop(text: string) {
   return false;
 }
 
-function readableText(text: string) {
+function hasOfferCue(text: string) {
+  const value = fold(text);
+  const price = /(?:^|[^a-z0-9])(?:\d{1,3}(?:[.,]\d{3})+|\d{2,})\s*(?:k\b|d\b|dong\b|vnd\b|nghin\b|ngan\b|trieu\b|₫)/.test(value);
+  const labeled = /\b(?:ma|voucher|code)\s*[:=]?\s*[a-z0-9][a-z0-9_-]{1,39}\b/.test(value);
+  const gift = /\btang\s+(?:[0-9]+|[a-z]{2,})\b/.test(value);
+  const code = /^[A-Z]{3,}[0-9][A-Z0-9_-]*$/.test(text);
+  return price || labeled || gift || code;
+}
+
+function readableText(text: string, confidence: number) {
   const tokens = text.match(/[\p{L}\p{N}]+/gu) ?? [];
   const characters = tokens.join('').length;
-  return characters >= 2 && characters / text.replace(/\s/g, '').length >= 0.65 &&
-    tokens.some(token => token.length >= 2) &&
-    (tokens.length <= 2 || tokens.filter(token => token.length > 1).length * 2 >= tokens.length) &&
-    !hasSpeechLoop(text);
+  if (characters < 2 || characters / text.replace(/\s/g, '').length < 0.65 || hasSpeechLoop(text)) return false;
+  if (hasOfferCue(text)) return confidence >= 60;
+  // High OCR confidence by itself does not make isolated fragments into readable text.
+  const words = tokens.filter(token => /\p{L}{3,}/u.test(token));
+  return confidence >= 70 && words.length >= 2 && words.length * 2 >= tokens.length;
 }
 
 export function screenOcrLines(lines: { text: string; confidence: number }[]) {
@@ -33,7 +44,7 @@ export function screenOcrLines(lines: { text: string; confidence: number }[]) {
   for (const row of lines) {
     const text = row.text.trim();
     if (!text) continue;
-    if (row.confidence < 60 || !Number.isFinite(row.confidence) || !readableText(text)) discarded++;
+    if (!Number.isFinite(row.confidence) || !readableText(text, row.confidence)) discarded++;
     else kept.push(text);
   }
   return { text: kept.join('\n'), discarded };
@@ -43,12 +54,18 @@ export function screenedSource(source: MediaSource, count: number, discarded: nu
   const detail = source === 'audio'
     ? count ? `Đã nhận dạng ${count} đoạn lời thoại.` : 'Chưa nhận ra lời thoại.'
     : count ? `Đã giữ chữ đọc được tại ${count} mốc.` : 'Chưa đọc được chữ đủ rõ trên các khung hình đã quét.';
-  const removed = source === 'audio' ? `Bỏ ${discarded} đoạn lặp bất thường.` : `Bỏ ${discarded} dòng chữ có độ tin cậy thấp.`;
+  const removed = source === 'audio' ? `Bỏ ${discarded} đoạn lặp bất thường.` : `Bỏ ${discarded} dòng chữ thiếu ngữ cảnh hoặc độ tin cậy thấp.`;
   return { state: count ? 'done' : 'empty', detail: discarded ? `${detail} ${removed}` : detail, discarded };
 }
 
 export function keepSpeechEvidence(rows: Evidence[]) {
   return rows.filter(row => row.source !== 'audio' || row.corrected || !hasSpeechLoop(row.text));
+}
+
+export function filteredSpeech(clip: Clip) {
+  const source = clip.lastScan?.sources?.audio;
+  if (source?.state !== 'empty' || !source.discarded || clip.evidence.some(row => row.source !== 'frame')) return '';
+  return `Đã loại ${source.discarded} đoạn lời thoại lặp bất thường. Lời thoại còn 0 đoạn để đối chiếu. Bạn có thể thêm phụ đề SRT/VTT hoặc nhập câu quảng cáo có mốc thời gian.`;
 }
 
 export function screenSavedEvidence(clip: Clip): Clip {

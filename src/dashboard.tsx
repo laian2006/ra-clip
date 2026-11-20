@@ -12,6 +12,7 @@ import { EvidenceFrame, EvidenceTimeline } from './evidence';
 import { captionsFor } from './captions';
 import { lastScanDetail, lastScanLabel } from './batch';
 import { coverageHelp } from './audit';
+import { filteredSpeech } from './evidence-quality';
 import type { ScanOptions } from './media';
 import { numberLabel } from './catalog';
 import { leadVerdict, verdicts } from './workflow';
@@ -192,7 +193,7 @@ export function ClipPlayer({ clip, jump, file }: { clip: Clip; jump: { time: num
 export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onReview, onEdit, onDelete, onEvidence, onScan, onBack, onOffers, hasSku, busy }: {
   clip: Clip; result?: ClipResult; focusedFinding: string; reviews: Record<string, Review>;
   notes?: Record<string, string>; onReview: (id: string, value: Review | '') => void;
-  onEdit: (clip: Clip) => void; onDelete: (clip: Clip) => void; onScan: (clip: Clip, options?: ScanOptions) => void;
+  onEdit: (clip: Clip, focusSubtitles?: boolean) => void; onDelete: (clip: Clip) => void; onScan: (clip: Clip, options?: ScanOptions) => void;
   onBack: () => void; onOffers: () => void; hasSku: boolean; busy: boolean;
   onEvidence: (clip: Clip, index: number | null) => void;
 }) {
@@ -208,6 +209,7 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
   const active = findings.find(row => row.id === findingId) ?? findings[0];
   const activeReview = active ? reviews[active.id] : undefined;
   const playable = clip.localMedia || Boolean(clip.demoMedia);
+  const speechGap = filteredSpeech(clip);
   const coverage = active && ((!hasSku && active.verdict === 'review') || (active.kind === 'coverage' && !active.evidence))
     ? coverageHelp(clip, hasSku) : undefined;
   const unclearEvidence = active?.kind === 'coverage' ? active.evidence : undefined;
@@ -221,11 +223,13 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
     requestAnimationFrame(() => document.getElementById('timeline-heading')?.focus());
   }
 
-  const step = coverage?.action ?? (unclearIndex >= 0 ? 'correct' : active?.reason.includes('ngày đăng') ? 'edit' : 'offers');
+  const step = coverage?.action ?? (unclearIndex >= 0 ? 'correct' : active?.reason.includes('ngày đăng') ? 'edit'
+    : active?.reason.startsWith('Chưa đủ nội dung để đối chiếu thể lệ') ? 'segments' : 'offers');
   const nextAction = {
     sku: { label: clip.sku ? 'Gán lại mã sản phẩm' : 'Gán mã sản phẩm', run: () => onEdit(clip) },
     audio: { label: playable ? clip.lastScan?.audio || clip.lastScan?.sources?.audio ? 'Thử lại lời thoại' : 'Quét lời thoại' : 'Bổ sung phụ đề',
       run: () => playable ? onScan(clip, { audio: true, frame: false }) : onEdit(clip) },
+    subtitles: { label: 'Thêm phụ đề hoặc lời thoại', run: () => onEdit(clip, true) },
     segments: { label: 'Xem các đoạn đã đọc', run: () => openSegments() },
     scan: { label: 'Quét video này', run: () => onScan(clip) },
     correct: { label: 'Sửa đoạn lời thoại', run: () => onEvidence(clip, unclearIndex) },
@@ -262,6 +266,10 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
         <FileVideo size={15} aria-hidden="true" /> Gắn file video hoặc phụ đề
       </button>}
       {playable && <button className="text-button scan-video" type="button" onClick={() => onScan(clip)} disabled={busy}><ScanLine size={15} /> Phân tích video bằng AI</button>}
+      {speechGap && (tab === 'segments' || coverage?.action !== 'subtitles') && <div className="scan-guidance">
+        <p>{speechGap}</p>
+        <button type="button" className="text-button" onClick={() => onEdit(clip, true)} disabled={busy}>Thêm phụ đề hoặc lời thoại</button>
+      </div>}
       <div className="segmented evidence-tabs" role="group" aria-label="Xem bằng chứng">
         <button type="button" className={tab === 'results' ? 'active' : ''} aria-pressed={tab === 'results'} onClick={() => setTab('results')}>Phát hiện</button>
         <button type="button" className={tab === 'segments' ? 'active' : ''} aria-pressed={tab === 'segments'} onClick={() => openSegments()}>Đoạn trích<span>{clip.evidence.length}</span></button>

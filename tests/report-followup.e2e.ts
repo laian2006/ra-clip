@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { version as releaseVersion } from '../package.json';
 import type { Clip, OfferVersion } from '../src/domain';
 
 const at = '2026-11-20T09:00';
@@ -36,7 +37,7 @@ test('an ASR loop cannot enter stored evidence or cause the correct purchase and
     contentType: 'text/javascript',
     body: `self.onmessage = () => self.postMessage(${JSON.stringify({ kind: 'success', evidence: [
       { start: 0, end: 2, text: noisy, source: 'audio' },
-      { start: 3, end: 6, text: 'Rất, rất rẻ. Giá 140k, mua một tặng một.', source: 'audio' },
+      { start: 3, end: 6, text: 'Rất, rất rẻ. Giá 140k, mua một tặng một nhanh tay chốt đơn.', source: 'audio' },
     ] })});`,
   }));
   await seedShop(page, []);
@@ -52,11 +53,32 @@ test('an ASR loop cannot enter stored evidence or cause the correct purchase and
   await expect(detail.locator('.evidence-card .tag')).toHaveText('Khớp bảng');
   await expect(detail.getByText(/Bỏ 1 đoạn lặp bất thường/)).toBeVisible();
   await detail.getByRole('button', { name: 'Lời thoại · 1 đoạn' }).click();
-  await expect(detail.getByText('Rất, rất rẻ. Giá 140k, mua một tặng một.', { exact: true })).toBeVisible();
+  await expect(detail.getByText('Rất, rất rẻ. Giá 140k, mua một tặng một nhanh tay chốt đơn.', { exact: true })).toBeVisible();
   await expect(detail).not.toContainText('nướng nướng');
   await page.reload();
   await expect(detail.locator('.evidence-card .tag')).toHaveText('Khớp bảng');
   await expect(detail.getByText(/Bỏ 1 đoạn lặp bất thường/)).toBeVisible();
+});
+
+test('a filtered empty transcript leads to adding subtitles and recovers a working audit', async ({ page }) => {
+  await seedShop(page, [{
+    id: 'filtered', sku: 'SON-MERZY', title: 'Video cần phụ đề', link: '', published: '', localMedia: false, demoMedia: true,
+    evidence: [], lastScan: {
+      at, audio: true, frame: false, state: 'empty', detail: 'Chưa nhận ra lời thoại. Bỏ 1 đoạn lặp bất thường.',
+      sources: { audio: { state: 'empty', discarded: 1, detail: 'Chưa nhận ra lời thoại. Bỏ 1 đoạn lặp bất thường.' } },
+    },
+  }]);
+  await expect(page.getByText(`v${releaseVersion}`, { exact: true })).toBeVisible();
+  const detail = page.locator('#clip-evidence');
+  await expect(detail.locator('.evidence-card')).toContainText('Lời thoại còn 0 đoạn');
+  await detail.getByRole('button', { name: 'Thêm phụ đề hoặc lời thoại', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  const input = dialog.getByLabel('Phụ đề hoặc ghi chú');
+  await expect(input).toBeFocused();
+  await input.fill('00:03 Giá 140k, mua một tặng một nhanh tay chốt đơn.');
+  await dialog.getByRole('button', { name: 'Lưu video', exact: true }).click();
+  await expect(detail.locator('.evidence-card .tag')).toHaveText('Khớp bảng');
+  await expect(detail.getByRole('button', { name: 'Thêm phụ đề hoặc lời thoại' })).toHaveCount(0);
 });
 
 test('three distinct review reasons lead to the right actions on a phone', async ({ page }) => {

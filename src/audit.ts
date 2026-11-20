@@ -1,9 +1,10 @@
-import { extractClaims, fold, giftKey, unclearSpokenVoucher } from './claims';
+import { compareGift, extractClaims, fold, unclearSpokenVoucher } from './claims';
 import { displayDate, kindLabels, money, normalizeCode, offerKey } from './domain';
 import type { Audit, Claim, Clip, Evidence, Finding, Offer, OfferVersion, Verdict } from './domain';
+import { filteredSpeech } from './evidence-quality';
 import { parseVietnamTime } from './time';
 
-export const auditRulesVersion = 2;
+export const auditRulesVersion = 3;
 
 export function validateOffers(input: Offer[], sourceLines?: number[]): Offer[] {
   if (!input.length) throw Error('Bảng ưu đãi cần ít nhất một dòng.');
@@ -118,8 +119,12 @@ function checkClaim(clip: Clip, claim: Claim, options: Offer[], now: number): Fi
   if (claim.kind === 'price' && offer.price !== null && claim.value !== offer.price) {
     mismatch = 'Giá được nhắc khác giá ghi trong bảng ưu đãi.';
   }
-  if (claim.kind === 'gift' && giftKey(String(claim.value)) !== giftKey(offer.gift)) {
-    mismatch = 'Quà tặng được nhắc khác bảng ưu đãi.';
+  if (claim.kind === 'gift') {
+    const comparison = compareGift(String(claim.value), offer.gift, claim.evidence.text);
+    if (comparison === 'unclear') {
+      return finding(clip, claim, 'review', 'Chưa đủ nội dung để đối chiếu thể lệ mua – tặng. Kiểm tra câu đầy đủ và quà được nêu trong clip.', reference);
+    }
+    if (comparison === 'different') mismatch = 'Quà tặng được nhắc khác bảng ưu đãi.';
   }
   const starts = offer.start ? parseVietnamTime(offer.start) : null;
   const ends = offer.end ? parseVietnamTime(offer.end, true) : null;
@@ -164,9 +169,11 @@ function checkClaim(clip: Clip, claim: Claim, options: Offer[], now: number): Fi
 export function coverageHelp(clip: Clip, hasSku: boolean) {
   if (!clip.sku) return { reason: 'Video chưa được gán mã sản phẩm.', action: 'sku' } as const;
   if (!hasSku) return { reason: 'Mã sản phẩm của video chưa có trong bảng ưu đãi.', action: 'sku' } as const;
+  const filtered = filteredSpeech(clip);
+  if (filtered) return { reason: filtered, action: 'subtitles' } as const;
   const hasAudioText = clip.evidence.some(row => row.source !== 'frame');
   const lastAudio = clip.lastScan?.sources?.audio;
-  if (lastAudio?.state === 'failed' || lastAudio?.state === 'empty' ||
+  if ((lastAudio?.state === 'failed' || lastAudio?.state === 'empty') && !hasAudioText ||
     (!lastAudio && clip.lastScan?.audio && !hasAudioText && clip.lastScan.state !== 'ready')) {
     return { reason: 'Chưa quét xong lời thoại. Thông tin được nói trong clip có thể chưa được đối chiếu.', action: 'audio' } as const;
   }
@@ -217,7 +224,8 @@ export function runAudit(clips: Clip[], versions: OfferVersion[], checkedAt: str
   const refreshed: string[] = [];
   const results = clips.map(clip => {
     const signature = JSON.stringify([clip.sku, clip.published, clip.evidence, Boolean(clip.localMedia || clip.demoMedia),
-      clip.lastScan?.audio, clip.lastScan?.frame, clip.lastScan?.state, clip.lastScan?.sources?.audio?.state]);
+      clip.lastScan?.audio, clip.lastScan?.frame, clip.lastScan?.state, clip.lastScan?.sources?.audio?.state,
+      clip.lastScan?.sources?.audio?.discarded]);
     const old = previousResults.get(clip.id);
     if (skus && old?.signature === signature && !skus.has(clip.sku)) return old;
     refreshed.push(clip.id);
