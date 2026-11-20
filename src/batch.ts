@@ -4,22 +4,14 @@ import { analyzeVideo, type ScanOptions } from './media';
 import { loadMedia } from './storage';
 import { demoAsset } from './demo';
 import { mergeScan } from './workflow';
+import { scanSourceDetail } from './evidence-quality';
 
 export interface BatchEvent {
   id: string;
   state: ScanReceipt['state'] | 'running' | 'stopped';
   detail: string;
   duration?: number;
-}
-
-export type BatchMode = 'audio' | 'frame' | 'both';
-
-export function scanTimeRange(clips: Clip[], mode: BatchMode, rate?: number) {
-  const unknown = clips.filter(clip => !clip.duration).length;
-  const duration = clips.reduce((seconds, clip) => seconds + (clip.duration || 60), 0);
-  const defaultRate: Record<BatchMode, number> = { audio: 0.7, frame: 0.5, both: 1 };
-  const expected = duration * (rate ?? defaultRate[mode]);
-  return { low: Math.max(1, Math.round(expected * 0.5)), high: Math.max(2, Math.ceil(expected * 2)), unknown };
+  usableTiming?: boolean;
 }
 
 export function needsScan(clip: Clip, options?: ScanOptions) {
@@ -35,7 +27,7 @@ export function scanReceipt(options: ScanOptions, result: Awaited<ReturnType<typ
   const states = Object.values(result.sources);
   return {
     ...options, at: localTime(), sources: result.sources,
-    state: result.evidence.length ? states.every(source => source.state === 'done' && !source.discarded) ? 'ready' : 'partial'
+    state: result.evidence.length ? states.every(source => source.state === 'done' && !source.discarded && !source.incomplete) ? 'ready' : 'partial'
       : states.some(source => source.state === 'failed') ? 'failed' : 'empty',
     detail: notes.join(' ').slice(0, 1600),
   };
@@ -79,7 +71,14 @@ export function lastScanLabel(clip: Clip) {
 
 export function lastScanDetail(clip: Clip) {
   const receipt = clip.lastScan;
-  if (!receipt || receipt.sources) return receipt?.detail;
+  if (!receipt) return;
+  if (receipt.sources) {
+    const current = (['audio', 'frame'] as const).flatMap(source => {
+      const detail = scanSourceDetail(clip, source);
+      return detail ? [`${sourceLabels[source]} · ${detail}`] : [];
+    });
+    if (current.length) return current.join(' ');
+  }
   if (/decode audio|EncodingError|failed to fetch|network|tunnel/i.test(receipt.detail)) {
     return 'Lượt quét cũ gặp lỗi. Thử quét lại hoặc dùng phụ đề SRT/VTT để bổ sung lời thoại.';
   }

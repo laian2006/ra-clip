@@ -53,11 +53,27 @@ export function keepSpeechEvidence(rows: Evidence[]) {
   return rows.filter(row => row.source !== 'audio' || row.corrected || !hasSpeechLoop(row.text));
 }
 
+export const isSpeechDraft = (row: Evidence) => row.source === 'audio' && !!row.lowConfidence && !row.corrected;
+
+export function scanSourceDetail(clip: Clip, source: MediaSource) {
+  const outcome = clip.lastScan?.sources?.[source];
+  if (source !== 'audio' || !outcome) return outcome?.detail;
+  // Versions 1.5.3 and 1.5.4 stored the number of drafts in the scan receipt.
+  const savedCount = /\s*Có \d+ đoạn độ tin cậy thấp để nghe lại\./u;
+  const drafts = clip.evidence.filter(isSpeechDraft).length;
+  if (!outcome.retried && !savedCount.test(outcome.detail) && !drafts) return outcome.detail;
+  const confirmed = clip.evidence.filter(row => row.source === 'audio' && row.corrected).length;
+  const detail = outcome.detail.replace(savedCount, '')
+    .replace(/^(?:Chưa nhận ra lời thoại\.|Đã nhận dạng \d+ đoạn lời thoại\.)\s*/u, '').trim();
+  return [detail, confirmed ? `Đã xác nhận ${confirmed} đoạn lời thoại.` : '', `Còn ${drafts} đoạn chờ nghe lại.`]
+    .filter(Boolean).join(' ');
+}
+
 export function filteredSpeech(clip: Clip) {
   const source = clip.lastScan?.sources?.audio;
   if (source?.state !== 'empty' || !source.discarded ||
     clip.evidence.some(row => row.source !== 'frame' && !referenceOnly(row))) return '';
-  const drafts = clip.evidence.filter(row => row.source === 'audio' && referenceOnly(row)).length;
+  const drafts = clip.evidence.filter(isSpeechDraft).length;
   if (drafts) {
     return `Đã loại lời thoại lặp bất thường. Lượt đọc lại có ${drafts} đoạn độ tin cậy thấp. Nghe lại đoạn gốc và lưu lời thoại đúng, hoặc thêm phụ đề SRT/VTT.`;
   }

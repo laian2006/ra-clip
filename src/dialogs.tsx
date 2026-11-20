@@ -6,6 +6,7 @@ import { readCount } from './catalog';
 import { readPrice, readSubtitles } from './files';
 import { offerWarnings, validateOffers } from './audit';
 import { prepareSpeech, speechIsReady, type ScanOptions, validateVideo } from './media';
+import { videoFileHint } from './video-limits';
 import { DuplicateVideo, type DuplicateChoice } from './duplicates';
 import { Modal } from './ui';
 
@@ -141,7 +142,7 @@ export function ClipDialog({ clip, focusSubtitles, skus, onSave, onClose, busy, 
         onDrop={event => { event.preventDefault(); if (!busy) pick(Array.from(event.dataTransfer.files)); }}>
         <span className="drop-icon"><ArrowUpFromLine size={20} /></span>
         <strong>{files.length ? `${files.length} video đã chọn · Đổi file` : 'Chọn hoặc kéo video vào đây'}</strong>
-        <small>MP4, WebM, MOV, M4V · tối đa 2 phút và 150 MB mỗi clip</small>
+        <small>{videoFileHint}</small>
       </button>
       {files.length > 0 && <div className="selected-files">
         {files.map((file, i) => <div key={i}>

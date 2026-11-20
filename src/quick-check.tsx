@@ -9,6 +9,7 @@ import { filteredSpeech } from './evidence-quality';
 import { referenceOnly } from './claims';
 import { auditCsv, download, readPrice, readSubtitles } from './files';
 import { analyzeVideo, validateVideo, videoMetadata, type ScanOptions } from './media';
+import { videoFileHint } from './video-limits';
 import { readOfferBrief } from './offer-brief';
 import { dateInput } from './time';
 import { ToolFindings } from './tool-findings';
@@ -29,7 +30,7 @@ function draftEvidence(input: string, source: Evidence['source']): Evidence[] {
   return [{ start: 0, end: null, text, source, untimed: true }];
 }
 
-export function QuickCheck() {
+export function QuickCheck({ batchRunning = false }: { batchRunning?: boolean }) {
   const [draft, setDraft] = useState(emptyOffer);
   const [checkedAt, setCheckedAt] = useState(localTime);
   const [subtitles, setSubtitles] = useState('');
@@ -47,6 +48,7 @@ export function QuickCheck() {
   const videoInput = useRef<HTMLInputElement>(null);
   const subtitleInput = useRef<HTMLTextAreaElement>(null);
   const running = reading || !!progress;
+  const scanBlocked = batchRunning && !!video && (scan.frame || scan.audio);
   const cachedScan = useRef<{ video: File; audio: boolean; frame: boolean; value: Awaited<ReturnType<typeof analyzeVideo>> }>(undefined);
 
   useEffect(() => () => active.current?.abort(), []);
@@ -104,7 +106,7 @@ export function QuickCheck() {
 
   async function check(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (active.current || running) return;
+    if (active.current || running || scanBlocked) return;
     resetResult();
     const controller = new AbortController();
     active.current = controller;
@@ -183,7 +185,7 @@ export function QuickCheck() {
             {video ? <><span>{video.name}</span><button type="button" className="text-button" onClick={() => {
               resetResult(); setVideo(undefined); cachedScan.current = undefined;
               if (videoInput.current) videoInput.current.value = '';
-            }}>Bỏ file</button></> : <span>MP4, WebM, M4V, MOV · tối đa 2 phút và 150 MB</span>}
+            }}>Bỏ file</button></> : <span>{videoFileHint}</span>}
           </div>
           {video && <div className="scan-options" role="group" aria-label="Nguồn quét">
             <label><input type="checkbox" checked={scan.frame} onChange={event => { resetResult(); setScan({ ...scan, frame: event.target.checked }); }} /> Quét chữ trên video</label>
@@ -238,10 +240,11 @@ export function QuickCheck() {
         {progress && <p className="progress-message" role="status"><LoaderCircle size={15} className="spin" aria-hidden="true" /> {progress}</p>}
         <div>
           {progress && <button type="button" className="button secondary" onClick={() => active.current?.abort()}>Dừng quét</button>}
-          <button type="submit" className="button primary" disabled={running}><ScanLine size={17} aria-hidden="true" /> Kiểm bản nháp</button>
+          <button type="submit" className="button primary" disabled={running || scanBlocked}><ScanLine size={17} aria-hidden="true" /> Kiểm bản nháp</button>
         </div>
       </div>
-    </form>
+        {scanBlocked && <p className="hint-text">Lượt quét nền đang dùng mô hình. Có thể kiểm bằng kịch bản hoặc phụ đề trong lúc chờ.</p>}
+      </form>
     {result && <section className="panel tool-panel" aria-labelledby="quick-result">
       <div className="panel-heading tool-heading">
         <div><h2 id="quick-result" ref={resultTitle} tabIndex={-1}>Kết quả kiểm bản nháp</h2>

@@ -176,6 +176,9 @@ export function coverageHelp(clip: Clip, hasSku: boolean) {
   } as const;
   const hasAudioText = clip.evidence.some(row => row.source !== 'frame' && !referenceOnly(row));
   const lastAudio = clip.lastScan?.sources?.audio;
+  if (lastAudio?.incomplete) {
+    return { reason: 'Một phần lời thoại chưa được quét. Hãy quét lại hoặc thêm phụ đề để kiểm tra phần còn thiếu.', action: 'audio' } as const;
+  }
   if ((lastAudio?.state === 'failed' || lastAudio?.state === 'empty') && !hasAudioText ||
     (!lastAudio && clip.lastScan?.audio && !hasAudioText && clip.lastScan.state !== 'ready')) {
     return { reason: 'Chưa quét xong lời thoại. Thông tin được nói trong clip có thể chưa được đối chiếu.', action: 'audio' } as const;
@@ -212,7 +215,11 @@ function scanClip(clip: Clip, offers: Offer[], history: Offer[], now: number) {
     const result = finding(clip, null, 'review', legacyReason);
     return [{ ...result, reason: coverageHelp(clip, candidates.length > 0).reason }];
   }
-  return claims.map(claim => checkClaim(clip, claim, candidates, now));
+  const findings = claims.map(claim => checkClaim(clip, claim, candidates, now));
+  if (candidates.length && clip.lastScan?.sources?.audio?.incomplete) {
+    findings.push(finding(clip, null, 'review', coverageHelp(clip, true).reason));
+  }
+  return findings;
 }
 
 export function runAudit(clips: Clip[], versions: OfferVersion[], checkedAt: string, previous: Audit | null = null): Audit {

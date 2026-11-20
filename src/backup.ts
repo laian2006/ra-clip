@@ -7,11 +7,11 @@ import type {
 import type { MediaChange } from './storage';
 import { screenSavedEvidence } from './evidence-quality';
 import { parseVietnamTime } from './time';
+import { maxVideoBytes, maxVideoSeconds } from './video-limits';
 
 const MAGIC = 'RACLIP1\n';
 const PREFIX = 12;
 const MAX_HEADER = 20 * 1024 * 1024;
-const MAX_MEDIA = 150 * 1024 * 1024;
 const MAX_BACKUP = 1024 * 1024 * 1024;
 const sourceNames = ['audio', 'frame', 'subtitle', 'manual'] as const;
 const kinds = ['code', 'price', 'gift', 'coverage'] as const;
@@ -72,7 +72,9 @@ function readScan(value: unknown) {
     if (!rawSources[source]) return [];
     const item = object(rawSources[source]);
     return [[source, { state: oneOf(item.state, ['done', 'empty', 'failed'] as const), detail: string(item.detail, 1600),
-      discarded: item.discarded === undefined ? undefined : numeric(item.discarded, 100_000) }]];
+      discarded: item.discarded === undefined ? undefined : numeric(item.discarded, 100_000),
+      retried: item.retried === undefined ? undefined : numeric(item.retried, 100_000),
+      incomplete: item.incomplete === true ? true : undefined }]];
   }));
   return { at: date(row.at), detail: string(row.detail, 1600), audio: row.audio === true, frame: row.frame === true,
     sources: row.sources ? sources : undefined,
@@ -97,7 +99,7 @@ export async function makeBackup(draft: CampaignDraft, workspace: Workspace, med
     const blob = await mediaReader(clip.id);
     if (!blob?.size) throw Error(`Thiếu file video của “${clip.title}”.`);
     total += blob.size;
-    if (total > MAX_BACKUP || blob.size > MAX_MEDIA) throw Error('Bản sao lưu vượt giới hạn 1 GB hoặc có clip quá 150 MB.');
+    if (total > MAX_BACKUP || blob.size > maxVideoBytes) throw Error('Bản sao lưu vượt giới hạn 1 GB hoặc có clip quá 150 MB.');
     files.push({ id: clip.id, size: blob.size, type: blob.type });
     blobs.push(blob);
   }
@@ -174,7 +176,7 @@ export async function readBackup(blob: Blob): Promise<{ draft: CampaignDraft; wo
       ...clipBasics(row), published: date(row.published, true),
       format: row.format ? oneOf<ClipFormat>(row.format, Object.keys(clipFormats) as ClipFormat[]) : undefined,
       localMedia: row.localMedia === true, mediaRevision: crypto.randomUUID(),
-      duration: row.duration === undefined ? undefined : numeric(row.duration, 120),
+      duration: row.duration === undefined ? undefined : numeric(row.duration, maxVideoSeconds),
       lastScan: row.lastScan ? readScan(row.lastScan) : undefined,
       evidence: array(row.evidence, 1500).map(readEvidence),
       masks: array(row.masks ?? [], 2000).map(readMask),
@@ -220,7 +222,7 @@ export async function readBackup(blob: Blob): Promise<{ draft: CampaignDraft; wo
   const media = array(raw.files, 4000).map(value => {
     const entry = object(value);
     const id = newId(entry.id);
-    const length = numeric(entry.size, MAX_MEDIA);
+    const length = numeric(entry.size, maxVideoBytes);
     const type = string(entry.type, 100);
     if (!expected.delete(id) || !Number.isInteger(length) || !length || offset + length > blob.size) throw malformed();
     const chunk = blob.slice(offset, offset + length, /^video\/[a-z0-9.+-]+$/i.test(type) ? type : '');

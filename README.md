@@ -10,6 +10,8 @@ Kiểm bản nháp trước khi đăng và rà lại video bán hàng khi giá, 
 
 [Ghi chú phát hành 1.5.3–1.5.4 và kết quả kiểm chứng FIX-12](docs/ban-phat-hanh-1.5.3.md).
 
+[Ghi chú phát hành 1.6.0 và kết quả xử lý báo cáo kiểm thử](docs/ban-phat-hanh-1.6.0.md).
+
 ## Chạy trên web
 
 Mở [Rà Clip trên GitHub Pages](https://laian2006.github.io/ra-clip/) để thử với dữ liệu mẫu hoặc dữ liệu của bạn. Sau khi cập nhật `main`, GitHub Actions kiểm thử và đưa bản build đạt kiểm thử lên web.
@@ -52,7 +54,7 @@ Sau khi cập nhật bảng, mục **Tác động của bảng** so sánh hai ph
 
 - **Chiến dịch:** mở **Quản lý chiến dịch** để tạo hoặc đổi tên từng đợt sale. Mỗi chiến dịch có kho video, bảng ưu đãi, phản hồi và nhật ký riêng. Chọn **Dùng dữ liệu của bạn** để vào không gian mặc định. Dữ liệu đã lưu bằng phiên bản 1.0 vẫn mở trong không gian này.
 - **Bảng ưu đãi:** nhập trang đầu của XLSX hoặc file CSV/TSV có các cột `sku, name, voucher, price, gift, start, end, condition`. Dùng mẫu CSV trong app. Mỗi cặp SKU và voucher là một dòng. Dòng không có mã đại diện cho giá hoặc ưu đãi thông thường. Giá tính bằng VNĐ, thời hạn dùng giờ Việt Nam (UTC+7).
-- **Kho video:** thêm MP4, WebM, M4V hoặc MOV mà trình duyệt đọc được, tối đa 150 MB và 2 phút mỗi file, tối đa 20 file mỗi lượt. Gán SKU, ngày đăng và kiểu video. Có thể dùng phụ đề SRT/VTT hoặc ghi chú như `00:05 Còn 99k khi áp mã SALE99.`
+- **Kho video.** Thêm MP4, WebM, M4V hoặc MOV mà trình duyệt đọc được, tối đa 150 MB và 5 phút mỗi file, tối đa 20 file mỗi lượt. Gán SKU, ngày đăng và kiểu video. Có thể dùng phụ đề SRT/VTT hoặc ghi chú như `00:05 Còn 99k khi áp mã SALE99.`
 - Khi gặp file, link hoặc ID trùng trong cùng chiến dịch, app hỏi cách xử lý trước khi lưu. **Tìm video trùng** lọc các bản đã lưu. Sau khi xóa, **Hoàn tác xóa** khôi phục file, đoạn trích và phản hồi trong 30 giây hoặc trước khi chuyển chiến dịch.
 - **Nhập danh sách video.** từ **Kho video** chọn **Nhập danh sách** và tải mẫu CSV nếu cần. App xem trước dòng mới, dòng cập nhật, dòng trùng và dòng lỗi. Link hoặc ID nhận diện video. Cập nhật giữ file và đoạn trích đã lưu. Cột có thể nhập gồm `title, sku, link, published, format, video_id, creator, views, orders`. Với ID dài trong Excel, đặt ô ở dạng văn bản hoặc dùng link TikTok đầy đủ. Các số liệu là số được nhập vào chiến dịch.
 - **Quét hàng loạt.** chọn tối đa 20 video đã có file, chọn đọc chữ, lời thoại hoặc cả hai. Kết quả mỗi video được lưu ngay. Khi dừng, phần còn lại được giữ trong lựa chọn. Dùng bộ lọc trong kho để tìm clip thiếu SKU, bằng chứng hoặc file.

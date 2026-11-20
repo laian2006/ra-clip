@@ -2,18 +2,16 @@ import type { Evidence, MediaSource, ScanSource } from './domain';
 import { keepSpeechEvidence, screenOcrLines, screenedSource } from './evidence-quality';
 import { referenceOnly } from './claims';
 import { speechSampleRate, type SpeechResult } from './speech-recovery';
+import { maxVideoBytes, maxVideoSeconds, scanFrameCount } from './video-limits';
 
-const MAX_BYTES = 150 * 1024 * 1024;
-const MAX_DURATION = 120;
 const IMAGE_EDGE = 960;
-const MAX_FRAMES = 48;
 
 export const supportedVideo = (file: File) =>
   /\.(mp4|m4v|webm|mov)$/i.test(file.name) || /^(video\/mp4|video\/webm|video\/quicktime)$/.test(file.type);
 
 export function validateVideo(file: File) {
   if (!supportedVideo(file)) throw Error('Chọn video MP4, WebM, M4V hoặc MOV.');
-  if (!file.size || file.size > MAX_BYTES) throw Error('Video phải nhỏ hơn 150 MB.');
+  if (!file.size || file.size > maxVideoBytes) throw Error('Video phải có dung lượng từ 1 byte đến 150 MB.');
 }
 
 function waitForMedia(video: HTMLVideoElement, eventName: string, signal: AbortSignal) {
@@ -53,7 +51,7 @@ export async function videoMetadata(blob: Blob, signal = new AbortController().s
     if (!Number.isFinite(video.duration) || !video.videoWidth || !video.videoHeight) {
       throw Error('Không đọc được kích thước hoặc thời lượng của video.');
     }
-    if (video.duration > MAX_DURATION) throw Error('Chọn video tối đa 2 phút.');
+    if (video.duration > maxVideoSeconds) throw Error('Chọn video tối đa 5 phút.');
     return { video, release };
   } catch (error) {
     release();
@@ -115,7 +113,8 @@ function speechTask(input: Float32Array | 'prepare', progress: (message: string)
       if (event.data.kind === 'success') {
         speechReady = true;
         resolve({ evidence: event.data.evidence ?? [], discarded: event.data.discarded ?? 0,
-          retried: event.data.retried ?? 0, timingRejected: event.data.timingRejected ?? 0 });
+          retried: event.data.retried ?? 0, timingRejected: event.data.timingRejected ?? 0,
+          failedParts: event.data.failedParts });
       }
       else reject(Error(event.data.message || 'Lỗi nhận dạng lời thoại.'));
     };
@@ -252,7 +251,7 @@ async function readFrames(video: HTMLVideoElement, progress: (message: string) =
       return { ...screenOcrLines(lines?.length ? lines : data.text.split('\n').map(text => ({ text, confidence: data.confidence }))),
         confidence: data.confidence };
     };
-    const frames = Math.max(1, Math.min(MAX_FRAMES, Math.ceil(video.duration / 2)));
+    const frames = scanFrameCount(video.duration);
     for (let i = 0; i < frames; i++) {
       signal.throwIfAborted();
       const at = Math.min(video.duration * (i + 0.25) / frames, video.duration - 0.02);
@@ -316,9 +315,13 @@ export async function analyzeVideo(blob: Blob, options: ScanOptions, progress: (
           const drafts = kept.filter(referenceOnly).length;
           const outcome = screenedSource('audio', kept.length - drafts, speech.discarded + speech.evidence.length - kept.length);
           if (speech.retried) {
+            outcome.retried = speech.retried;
             outcome.detail += ` Đã thử đọc lại ${speech.retried} đoạn âm thanh ngắn.`;
-            if (speech.timingRejected) outcome.detail += ` Bỏ ${speech.timingRejected} đoạn có mốc thời gian bất thường.`;
-            if (drafts) outcome.detail += ` Có ${drafts} đoạn độ tin cậy thấp để nghe lại.`;
+          }
+          if (speech.timingRejected) outcome.detail += ` Bỏ ${speech.timingRejected} đoạn có mốc thời gian bất thường.`;
+          if (speech.failedParts) {
+            outcome.incomplete = true;
+            outcome.detail += ` Có ${speech.failedParts} phần chưa đọc được. Có thể thêm phụ đề hoặc thử quét lại.`;
           }
           sources.audio = outcome;
         }

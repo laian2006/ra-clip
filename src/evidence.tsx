@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { CircleAlert, CirclePlay, Image, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { fold, referenceOnly } from './claims';
+import { isSpeechDraft } from './evidence-quality';
+import { suggestShopTerm } from './shop-terms';
+import type { SpeechDraftEdit } from './workflow';
 import { sourceLabels, timestamp } from './domain';
 import type { Clip, Evidence } from './domain';
 import { Modal } from './ui';
@@ -46,14 +49,36 @@ export function EvidenceFrame({ clip, seconds, onJump }: { clip: Clip; seconds: 
   </div>;
 }
 
-export function EvidenceTimeline({ clip, playable, busy, initialSource, onJump, onEdit }: {
+export function EvidenceTimeline({ clip, playable, busy, initialSource, shopTerms, onJump, onEdit, onConfirmDrafts }: {
   clip: Clip; playable: boolean; busy: boolean; initialSource: Evidence['source'] | 'all';
+  shopTerms: string[];
   onJump: (at: number) => void; onEdit: (index: number | null) => void;
+  onConfirmDrafts: (drafts: SpeechDraftEdit[]) => Promise<void>;
 }) {
   const [source, setSource] = useState(initialSource);
   const [search, setSearch] = useState('');
+  const [excluded, setExcluded] = useState(new Set<Evidence>());
+  const [draftText, setDraftText] = useState(new Map<Evidence, string>());
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const rows = clip.evidence.flatMap((entry, index) =>
     (source === 'all' || entry.source === source) && fold(entry.text).includes(fold(search.trim())) ? [{ entry, index }] : []);
+  const drafts = rows.map(row => row.entry).filter(isSpeechDraft);
+  const chosen = drafts.filter(entry => !excluded.has(entry));
+
+  async function confirmDrafts() {
+    if (saving || busy || !chosen.length) return;
+    setSaving(true);
+    setSaveError('');
+    try {
+      await onConfirmDrafts(chosen.map(entry => ({ entry, text: draftText.get(entry) ?? entry.text })));
+      setDraftText(values => new Map([...values].filter(([entry]) => !chosen.includes(entry))));
+      setExcluded(new Set());
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Chưa lưu được các đoạn đã chọn.');
+    } finally { setSaving(false); }
+  }
+
   return <div className="timeline" id="timeline-heading" tabIndex={-1} role="region" aria-label="Các đoạn trích">
     <div className="timeline-tools">
       <label className="search-box"><Search size={16} /><input aria-label="Tìm đoạn trích" placeholder="Tìm đoạn trích…"
@@ -62,17 +87,54 @@ export function EvidenceTimeline({ clip, playable, busy, initialSource, onJump, 
         <option value="all">Mọi nguồn</option>
         {Object.entries(sourceLabels).map(([key, value]) => <option value={key} key={key}>{value}</option>)}
       </select>
-      <button type="button" className="button secondary" disabled={busy} onClick={() => onEdit(null)}><Plus size={15} /> Thêm đoạn</button>
+      <button type="button" className="button secondary" disabled={busy || saving} onClick={() => onEdit(null)}><Plus size={15} /> Thêm đoạn</button>
     </div>
-    <ul className="timeline-list">{rows.map(({ entry, index }) => <li key={index}>
+    {drafts.length > 0 && <div className="draft-review">
+      <p>Nghe và kiểm tra các đoạn đang chọn trước khi lưu để đối chiếu.</p>
+      <div>
+        <button className="text-button" type="button" disabled={busy || saving}
+          onClick={() => setExcluded(new Set(chosen.length === drafts.length ? drafts : []))}>
+          {chosen.length === drafts.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
+        </button>
+        <button className="button primary" type="button" disabled={busy || saving || !chosen.length}
+          onClick={() => void confirmDrafts()}>Lưu {chosen.length}/{drafts.length} đoạn đã chọn</button>
+      </div>
+    </div>}
+    {saveError && <p className="form-error" role="alert">{saveError}</p>}
+    <ul className="timeline-list">{rows.map(({ entry, index }) => {
+      const draft = isSpeechDraft(entry);
+      const text = draftText.get(entry) ?? entry.text;
+      const suggestion = draft && suggestShopTerm(text, shopTerms);
+      return <li key={index}>
       <button type="button" className="time-button" disabled={!playable} onClick={() => onJump(entry.start)}
         aria-label={`Phát từ ${timestamp(entry.start)}`}><CirclePlay size={15}/>{timestamp(entry.start)}</button>
       <div><small>{sourceLabels[entry.source]}{entry.corrected && <span className="corrected">Đã sửa tay</span>}
-        {referenceOnly(entry) && <span className="low-confidence">Độ tin cậy thấp</span>}</small><p>{entry.text}</p></div>
-      <button type="button" className="icon-button" disabled={busy} onClick={() => onEdit(index)}
+        {referenceOnly(entry) && <span className="low-confidence">Độ tin cậy thấp</span>}</small><p>{text}</p>
+        {draft && <div className="draft-row-actions">
+          <label><input type="checkbox" checked={!excluded.has(entry)} disabled={busy || saving}
+            onChange={event => {
+              const checked = event.target.checked;
+              setExcluded(previous => {
+                const next = new Set(previous);
+                if (checked) next.delete(entry);
+                else next.add(entry);
+                return next;
+              });
+            }} aria-label={`Chọn lưu đoạn ${timestamp(entry.start)}`} /> Chọn lưu</label>
+          {suggestion && <button className="text-button" type="button" disabled={busy || saving}
+            onClick={() => setDraftText(previous => new Map(previous).set(entry, suggestion.text))}>
+            Sửa “{suggestion.from}” thành “{suggestion.to}”
+          </button>}
+          {draftText.has(entry) && <button className="text-button" type="button" disabled={busy || saving}
+            onClick={() => setDraftText(previous => {
+              const next = new Map(previous); next.delete(entry); return next;
+            })}>Bỏ sửa gợi ý</button>}
+        </div>}
+      </div>
+      <button type="button" className="icon-button" disabled={busy || saving} onClick={() => onEdit(index)}
         title={referenceOnly(entry) ? 'Kiểm tra đoạn' : 'Sửa đoạn'}
         aria-label={`${referenceOnly(entry) ? 'Kiểm tra đoạn' : 'Sửa đoạn'} ${timestamp(entry.start)} · ${sourceLabels[entry.source]}`}><Pencil size={15} /></button>
-    </li>)}</ul>
+    </li>})}</ul>
     {!rows.length && <p className="empty-inline">{clip.evidence.length ? 'Không có đoạn nào khớp bộ lọc.' : 'Chưa có đoạn trích. Phân tích video hoặc thêm một đoạn thủ công.'}</p>}
   </div>;
 }

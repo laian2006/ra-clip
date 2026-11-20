@@ -8,7 +8,7 @@ const version: OfferVersion = {
   id: 'v1', at, offers: [{ sku: 'SON-MERZY', name: 'Son', code: '', price: 140000, gift: 'Mua 1 tặng 1', start: '', end: '', condition: '' }],
 };
 
-async function seedShop(page: Page, clips: Clip[]) {
+async function seedShop(page: Page, clips: Clip[], offers = version) {
   await page.goto('/');
   await page.getByRole('heading', { name: 'Rà soát video sau sale' }).waitFor();
   await page.evaluate(async ({ at, clips, version }) => {
@@ -28,7 +28,7 @@ async function seedShop(page: Page, clips: Clip[]) {
       });
     } finally { db.close(); }
     localStorage.setItem('ra-clip-mode', 'shop');
-  }, { at, clips, version });
+  }, { at, clips, version: offers });
   await page.reload();
 }
 
@@ -110,6 +110,69 @@ test('reviewing recovered speech on a narrow screen enables it for the audit', a
   await expect(detail.locator('.evidence-card .tag')).toHaveText('Cần xử lý');
   await detail.getByRole('button', { name: /Chữ trên video · 1 đoạn/ }).click();
   await expect(detail.getByText('Độ tin cậy thấp', { exact: true })).toBeVisible();
+});
+
+test('saves chosen recovered lines together and keeps the live count after reloading', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const evidence = Array.from({ length: 6 }, (_, index) => ({
+    start: index * 16 + 2, end: index * 16 + 6, source: 'audio' as const, lowConfidence: true as const,
+    text: index === 0 ? 'Tên là Son Merzi.' : 'Đây là đoạn nói về màu son.',
+  }));
+  await seedShop(page, [{
+    id: 'bulk', sku: 'SON-MERZY', title: 'Sáu đoạn đọc lại', link: '', published: '', localMedia: false, demoMedia: true, evidence,
+    lastScan: {
+      at, audio: true, frame: false, state: 'partial', detail: 'Đã đọc lại.',
+      sources: { audio: { state: 'empty', discarded: 1, detail: 'Có 6 đoạn độ tin cậy thấp để nghe lại.' } },
+    },
+  }], { ...version, offers: [{ ...version.offers[0], name: 'Son Merzy' }] });
+  await page.getByRole('button', { name: 'Xem bằng chứng', exact: true }).click();
+  const detail = page.locator('#clip-evidence');
+  const summary = detail.locator('.clip-scan-summary');
+  await detail.getByRole('button', { name: 'Xem lời thoại đọc lại', exact: true }).click();
+  await expect(summary).toContainText('Còn 6 đoạn chờ nghe lại.');
+  await detail.getByRole('button', { name: /Son Merzi.*Son Merzy/ }).click();
+  await expect(detail.getByText('Tên là Son Merzy.', { exact: true })).toBeVisible();
+  const drafts = detail.getByRole('checkbox', { name: /Chọn lưu đoạn/ });
+  await expect(drafts).toHaveCount(6);
+  for (const index of [5, 4, 3]) await drafts.nth(index).uncheck();
+  await detail.getByRole('button', { name: 'Lưu 3/6 đoạn đã chọn' }).click();
+  await expect(summary).toContainText('Còn 3 đoạn chờ nghe lại.');
+  await detail.getByRole('button', { name: 'Lưu 3/3 đoạn đã chọn' }).click();
+  await expect(summary).toContainText('Còn 0 đoạn chờ nghe lại.');
+  await expect(summary).not.toContainText('Có 6 đoạn độ tin cậy thấp để nghe lại.');
+  await page.reload();
+  await page.getByRole('button', { name: 'Xem bằng chứng', exact: true }).click();
+  await expect(summary).toContainText('Còn 0 đoạn chờ nghe lại.');
+});
+
+test('keeps batch progress when switching views and announces completion', async ({ page }) => {
+  await page.route('**/speech.worker-*.js', route => route.fulfill({
+    contentType: 'text/javascript',
+    body: `self.onmessage = () => setTimeout(() => self.postMessage({ kind: 'success', evidence: [
+      { start: 2, end: 8, text: 'Giá 140k.', source: 'audio' }
+    ] }), 1700);`,
+  }));
+  await seedShop(page, ['a', 'b'].map(id => ({
+    id, title: `Clip nền ${id}`, sku: 'SON-MERZY', link: '', published: '', localMedia: false, demoMedia: true, evidence: [],
+  })));
+  const nav = page.getByRole('navigation');
+  await nav.getByRole('button', { name: 'Kho video', exact: true }).click();
+  await page.getByRole('button', { name: 'Quét hàng loạt', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Nguồn phân tích').selectOption('audio');
+  await dialog.getByRole('button', { name: 'Quét 2 video', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Tiếp tục quét nền' }).click();
+  const dock = page.getByRole('region', { name: 'Tiến độ quét nền' });
+  await nav.getByRole('button', { name: 'Bảng ưu đãi', exact: true }).click();
+  await expect(dock).toBeVisible();
+  await dock.getByRole('button', { name: 'Mở tiến độ' }).click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Tiếp tục quét nền' }).click();
+  await nav.getByRole('button', { name: 'Nhật ký rà', exact: true }).click();
+  await expect(page.getByText(/^Đã xong lượt quét\. 2 video có kết quả/)).toBeVisible({ timeout: 15000 });
+  await expect(dock).toHaveCount(0);
+  await nav.getByRole('button', { name: 'Kho video', exact: true }).click();
+  await expect(page.locator('.clip-row').filter({ hasText: 'Khớp bảng' })).toHaveCount(2);
 });
 
 test('three distinct review reasons lead to the right actions on a phone', async ({ page }) => {

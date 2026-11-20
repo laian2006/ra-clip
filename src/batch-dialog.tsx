@@ -4,28 +4,22 @@ import { fold } from './claims';
 import type { Clip } from './domain';
 import { scanLabels } from './domain';
 import { speechIsReady, type ScanOptions } from './media';
-import { lastScanDetail, lastScanLabel, needsScan, scanTimeRange, type BatchEvent, type BatchMode } from './batch';
+import { lastScanDetail, lastScanLabel, needsScan, type BatchEvent } from './batch';
+import { readScanTimings, saveScanTimings, scanTimeRange, timingMediaId, type BatchMode, type ScanSample } from './scan-timing';
 import { Modal } from './ui';
 
 const labels = { ...scanLabels, running: 'Đang quét', stopped: 'Đã dừng' };
 const limit = 20;
-const timingKey = (mode: BatchMode) => `ra-clip-scan-rate-${mode}`;
-
-function previousRate(mode: BatchMode) {
-  try {
-    const value = Number(localStorage.getItem(timingKey(mode)));
-    if (Number.isFinite(value) && value > 0 && value <= 60) return value;
-  } catch { /* Timing estimates also work without local storage. */ }
-}
-
 function elapsedLabel(seconds: number) {
   return seconds < 60 ? `${seconds} giây` : `${Math.floor(seconds / 60)} phút ${seconds % 60} giây`;
 }
 
-export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
+export function BatchDialog({ clips, initialClipId, visible, onRun, onClose, onHide, onShow }: {
   clips: Clip[]; initialClipId?: string;
+  visible: boolean;
   onRun: (ids: string[], options: ScanOptions, signal: AbortSignal, onEvent: (event: BatchEvent) => void) => Promise<void>;
   onClose: () => void;
+  onHide: () => void; onShow: () => void;
 }) {
   const videos = clips.filter(clip => clip.localMedia || clip.demoMedia);
   const [selected, setSelected] = useState(() => new Set(initialClipId
@@ -34,6 +28,7 @@ export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
   const [events, setEvents] = useState<Record<string, BatchEvent>>({});
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<BatchMode>('both');
+  const [history, setHistory] = useState(() => readScanTimings('both'));
   const [running, setRunning] = useState(false);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState('');
@@ -48,8 +43,9 @@ export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
   const startButton = useRef<HTMLButtonElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const options = { audio: mode !== 'frame', frame: mode !== 'audio' };
-  const rate = previousRate(mode);
-  const previewTime = scanTimeRange(videos.filter(clip => selected.has(clip.id)), mode, rate);
+  const planned = videos.filter(clip => selected.has(clip.id));
+  const cold = options.audio && !speechIsReady();
+  const previewTime = scanTimeRange(planned, mode, history, cold);
   const filtered = videos.filter(clip => fold(`${clip.title} ${clip.sku}`).includes(fold(query.trim())));
   useEffect(() => () => controller.current?.abort(), []);
   useEffect(() => {
@@ -76,12 +72,10 @@ export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
     controller.current = task;
     const ids = videos.map(clip => clip.id).filter(id => selected.has(id));
     const finished = new Set<string>();
+    const measured: ScanSample[] = [];
     let start = performance.now();
-    let measured = 0;
-    let measuredTime = 0;
-    let timedVideo = 0;
-    let durationMeasuredTime = 0;
     let currentId = '';
+    let coldStart = cold;
     started.current = start;
     clipStarted.current = start;
     setAverage(undefined);
@@ -95,22 +89,20 @@ export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
         if (event.state === 'running' && currentId !== event.id) {
           currentId = event.id;
           start = performance.now();
+          coldStart = options.audio && !speechIsReady();
           clipStarted.current = start;
           setClipElapsed(0);
         }
         if (event.state !== 'running') {
           if (event.state !== 'stopped') {
             finished.add(event.id);
-            if (event.state !== 'failed') {
-              measured++;
-              const time = performance.now() - start;
-              measuredTime += time;
-              if (event.duration) {
-                timedVideo += event.duration;
-                durationMeasuredTime += time;
-              }
+            const clip = videos.find(item => item.id === event.id);
+            if (clip && event.duration && event.usableTiming) {
+              measured.push({ media: timingMediaId(clip), duration: event.duration,
+                seconds: (performance.now() - start) / 1000, cold: coldStart && speechIsReady() });
+              setHistory([...history, ...measured]);
+              setAverage(Math.ceil(measured.reduce((total, sample) => total + sample.seconds, 0) / measured.length));
             }
-            if (measured) setAverage(Math.max(1, Math.ceil(measuredTime / measured / 1000)));
           }
           setAnnounced(`${videos.find(clip => clip.id === event.id)?.title ?? 'Video'} · ${labels[event.state]}`);
         }
@@ -118,12 +110,10 @@ export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
       if (task.signal.aborted) setSelected(new Set(ids.filter(id => !finished.has(id))));
       setAnnounced(task.signal.aborted ? 'Đã dừng. Các video hoàn tất đã được lưu.' : 'Đã hoàn tất lượt quét.');
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+      const message = failure instanceof Error ? failure.message : String(failure);
+      setError(message);
     } finally {
-      if (timedVideo) {
-        try { localStorage.setItem(timingKey(mode), String(durationMeasuredTime / 1000 / timedVideo)); }
-        catch { /* The elapsed time still appears in the current scan. */ }
-      }
+      if (measured.length) setHistory(saveScanTimings(mode, history, measured));
       setRunning(false);
       controller.current = null;
       requestAnimationFrame(() => {
@@ -135,14 +125,32 @@ export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
 
   const done = Object.values(events).filter(event => event.state !== 'running' && event.state !== 'stopped').length;
   const runningVideo = Object.values(events).find(event => event.state === 'running');
-  const remaining = average === undefined ? undefined
-    : average * Math.max(0, total - done - Number(Boolean(runningVideo))) +
-      (runningVideo ? Math.max(0, average - clipElapsed) : 0);
+  const remainingTime = scanTimeRange(planned.filter(clip => !events[clip.id] || events[clip.id].state === 'running'), mode, history, cold);
+  const remaining = Math.max(0, remainingTime.expected - (runningVideo ? clipElapsed : 0));
+  const currentTitle = videos.find(clip => clip.id === runningVideo?.id)?.title;
+  const remainingLabel = done >= total ? 'Đang lưu lượt quét.' :
+    remaining > 0 ? `Còn khoảng ${elapsedLabel(remaining)}.` : 'Đang xử lý lâu hơn dự kiến.';
+  if (!visible) return running ? <section className="batch-dock" aria-label="Tiến độ quét nền">
+    <div className="batch-dock-status">
+      <strong role="status">Đang quét nền · {done}/{total} video</strong>
+      {runningVideo && <span>{currentTitle} · {runningVideo.detail}</span>}
+      <small>{remainingLabel}</small>
+    </div>
+    <div className="batch-dock-actions">
+      <button type="button" className="button secondary" onClick={onShow}>Mở tiến độ</button>
+      <button type="button" className="text-button" onClick={() => controller.current?.abort()}>Dừng lượt quét</button>
+    </div>
+  </section> : null;
+
   return <Modal title="Quét video hàng loạt" detail="Chọn tối đa 20 file. App lưu kết quả từng video khi hoàn tất." busy={running} onClose={onClose}>
     <div className="dialog-form">
       <p className="hint-text">Dùng với video đã có file trong kho và các clip mẫu. Khi dừng, các video còn lại sẽ được giữ trong lựa chọn.</p>
       <div className="batch-options">
-        <label className="stack-field">Nguồn phân tích<select value={mode} disabled={running} onChange={event => setMode(event.target.value as typeof mode)}>
+        <label className="stack-field">Nguồn phân tích<select value={mode} disabled={running} onChange={event => {
+          const next = event.target.value as BatchMode;
+          setMode(next);
+          setHistory(readScanTimings(next));
+        }}>
           <option value="both">Lời thoại và chữ trong hình</option><option value="frame">Chỉ chữ trong hình</option><option value="audio">Chỉ lời thoại</option>
         </select></label>
         <label className="stack-field">Lọc video<input type="search" placeholder="Tên hoặc SKU" value={query} disabled={running}
@@ -158,7 +166,7 @@ export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
       </div>
       {!running && selected.size > 0 && <div className="batch-progress">
         <p><strong>Ước lượng trước quét</strong> · {elapsedLabel(previewTime.low)} – {elapsedLabel(previewTime.high)}</p>
-        <p>{rate ? 'Theo tốc độ lượt quét trước trên thiết bị này.' : 'Mức gần đúng khi chưa đo tốc độ trên thiết bị này.'}
+        <p>{previewTime.calibrated ? 'Theo thời gian đã đo trên thiết bị này.' : 'Ước lượng ban đầu. App sẽ chỉnh theo tốc độ thực tế khi quét.'}
           {previewTime.unknown > 0 && ` Tạm tính 60 giây thời lượng cho mỗi file trong ${previewTime.unknown} video chưa biết thời lượng.`}
           {options.audio && !speechIsReady() && ' Lần đầu có thể mất thêm thời gian tải mô hình.'}</p>
       </div>}
@@ -167,9 +175,8 @@ export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
         <progress id="batch-progress" max={Math.max(1, total)} value={done} />
         {running && <>
           <p>Đã chạy {elapsedLabel(elapsed)}{average !== undefined && ` · Trung bình ${elapsedLabel(average)}/video`}</p>
-          {runningVideo && <p className="batch-current"><strong>{videos.find(clip => clip.id === runningVideo.id)?.title}</strong> · {runningVideo.detail}</p>}
-          {done < total && <p>{remaining === undefined ? 'Đang đo tốc độ từ video đầu tiên. Lần đầu có thể mất thêm thời gian tải mô hình.'
-            : remaining > 0 ? `Còn khoảng ${elapsedLabel(remaining)} theo tốc độ đã đo.` : 'Video hiện tại cần thêm thời gian so với mức trung bình.'}</p>}
+          {runningVideo && <p className="batch-current"><strong>{currentTitle}</strong> · {runningVideo.detail}</p>}
+          {done < total && <p>{remainingLabel}</p>}
         </>}
       </div>}
       <ul className="batch-list">{filtered.map(clip => {
@@ -185,7 +192,8 @@ export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
       <span className="sr-only" role="status" aria-atomic="true">{announced}</span>
       {error && <p className="form-error" role="alert"><CircleAlert size={16} /> {error}</p>}
       <div className="dialog-actions">
-        {running ? <button ref={stopButton} className="button secondary" type="button" onClick={() => controller.current?.abort()}>Dừng lượt quét</button>
+        {running ? <><button ref={stopButton} className="button secondary" type="button" onClick={() => controller.current?.abort()}>Dừng lượt quét</button>
+          <button className="button primary" type="button" onClick={onHide}>Tiếp tục quét nền</button></>
           : <><button ref={closeButton} className="button secondary" type="button" onClick={onClose}>Đóng</button>
             <button ref={startButton} className="button primary" type="button" disabled={!selected.size} onClick={() => void run()}><ScanLine size={16} /> Quét {selected.size} video</button></>}
       </div>

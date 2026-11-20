@@ -3,7 +3,7 @@ import { localTime } from './domain';
 import type {
   AuditSnapshot, AuditTrigger, Clip, Evidence, EvidenceMask, Finding, Review, Verdict, Workspace,
 } from './domain';
-import { screenSavedEvidence } from './evidence-quality';
+import { isSpeechDraft, screenSavedEvidence } from './evidence-quality';
 
 export const verdicts: Verdict[] = ['action', 'review', 'dated', 'clear'];
 
@@ -98,19 +98,26 @@ function toMask(segment: Evidence): EvidenceMask | undefined {
   return { source: segment.source, start: segment.start, end: segment.end };
 }
 
+function preserveEvidenceEdit(masks: EvidenceMask[], segment: Evidence) {
+  const mask = toMask(segment);
+  if (mask && !masks.some(row => row.source === mask.source && row.start === mask.start && row.end === mask.end)) masks.push(mask);
+}
+
+function evidenceText(value: string) {
+  const text = value.trim();
+  if (!text || text.length > 4000) throw Error('Nội dung đoạn trích cần từ 1 đến 4.000 ký tự.');
+  return text;
+}
+
 export function changeEvidence(clip: Clip, index: number | null, row: Pick<Evidence, 'start' | 'end' | 'text'> | null): Clip {
   if (index !== null && !clip.evidence[index]) throw Error('Đoạn trích đã thay đổi. Mở lại clip.');
   const previous = index === null ? undefined : clip.evidence[index];
   const output = [...clip.evidence];
   const masks = [...(clip.masks ?? [])];
-  const removed = previous && toMask(previous);
-  if (removed && !masks.some(mask => mask.source === removed.source && mask.start === removed.start && mask.end === removed.end)) {
-    masks.push(removed);
-  }
+  if (previous) preserveEvidenceEdit(masks, previous);
 
   if (row) {
-    const text = row.text.trim();
-    if (!text || text.length > 4000) throw Error('Nội dung đoạn trích cần từ 1 đến 4.000 ký tự.');
+    const text = evidenceText(row.text);
     if (!Number.isFinite(row.start) || row.start < 0 || row.start > 7200 ||
       (row.end !== null && (!Number.isFinite(row.end) || row.end < row.start || row.end > 7200))) {
       throw Error('Mốc thời gian chưa hợp lệ.');
@@ -122,6 +129,23 @@ export function changeEvidence(clip: Clip, index: number | null, row: Pick<Evide
 
   if (output.length > 1000) throw Error('Mỗi clip hỗ trợ tối đa 1.000 đoạn trích.');
   return { ...clip, evidence: output.sort((a, b) => a.start - b.start), masks };
+}
+
+export type SpeechDraftEdit = { entry: Evidence; text: string };
+
+export function confirmSpeechDrafts(clip: Clip, drafts: SpeechDraftEdit[]): Clip {
+  const updates = new Map(drafts.map(({ entry, text }) => [entry, evidenceText(text)]));
+  if (!updates.size || [...updates.keys()].some(entry => !isSpeechDraft(entry) || !clip.evidence.includes(entry))) {
+    throw Error('Các đoạn chờ xác nhận đã thay đổi. Mở lại phần Bằng chứng.');
+  }
+  const masks = [...(clip.masks ?? [])];
+  const evidence = clip.evidence.map(entry => {
+    const text = updates.get(entry);
+    if (text === undefined) return entry;
+    preserveEvidenceEdit(masks, entry);
+    return { ...entry, text, corrected: true, lowConfidence: undefined };
+  });
+  return { ...clip, evidence, masks };
 }
 
 function matchesMask(mask: EvidenceMask, row: Evidence) {

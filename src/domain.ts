@@ -50,6 +50,8 @@ export interface ScanSource {
   state: 'done' | 'empty' | 'failed';
   detail: string;
   discarded?: number;
+  retried?: number;
+  incomplete?: true;
 }
 
 export const scanLabels: Record<ScanReceipt['state'], string> = {

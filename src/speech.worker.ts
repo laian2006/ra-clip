@@ -1,6 +1,6 @@
 import { env, pipeline, type AutomaticSpeechRecognitionPipeline, type AutomaticSpeechRecognitionOutput } from '@huggingface/transformers';
 import type { Evidence } from './domain';
-import { recoverLoopedSpeech, speechSampleRate } from './speech-recovery';
+import { readSpeechParts, recoverLoopedSpeech, speechSampleRate } from './speech-recovery';
 
 env.allowLocalModels = false;
 if (env.backends.onnx.wasm) {
@@ -78,10 +78,14 @@ async function readSegments(transcriber: AutomaticSpeechRecognitionPipeline, sam
 
 async function recognize(samples: Float32Array) {
   const transcriber = await prepare();
-  self.postMessage({ kind: 'progress', message: 'Đang nhận dạng lời thoại tiếng Việt…' });
-  const firstPass = await readSegments(transcriber, samples, false);
-  return recoverLoopedSpeech(samples, firstPass, window => readSegments(transcriber, window, true), (current, total) => {
-    self.postMessage({ kind: 'progress', message: `Đọc lại lời thoại theo đoạn ngắn · ${current}/${total}` });
+  return readSpeechParts(samples, async (part, index, total) => {
+    const report = (message: string) =>
+      self.postMessage({ kind: 'progress', message: total > 1 ? `Lời thoại phần ${index}/${total} · ${message}` : message });
+    report('Đang nhận dạng lời thoại tiếng Việt…');
+    const firstPass = await readSegments(transcriber, part, false);
+    return recoverLoopedSpeech(part, firstPass, window => readSegments(transcriber, window, true), (current, windows) => {
+      report(`Đọc lại lời thoại theo đoạn ngắn · ${current}/${windows}`);
+    });
   });
 }
 

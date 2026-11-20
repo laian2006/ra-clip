@@ -461,6 +461,12 @@
   .timeline-list li { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 6px; align-items: flex-start; background: #f9f8f0; padding: 6px; border-radius: 7px; border: 1px solid var(--line); }
   .timeline-list li small { color: var(--muted); font-size: 9px; }
   .timeline-list li p { overflow-wrap: anywhere; white-space: pre-wrap; font-size: 11px; line-height: 1.4; }
+  .draft-review { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 7px; padding: 9px 10px; background: var(--review-bg); border-radius: 8px; font-size: 11px; }
+  .draft-review > div, .draft-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+  .draft-row-actions { margin-top: 5px; }
+  .draft-row-actions label { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; cursor: pointer; font-size: 11px; }
+  .draft-row-actions input { width: 16px; height: 16px; margin: 0; }
+  .draft-row-actions button { min-height: 32px; text-align: start; overflow-wrap: anywhere; }
   .corrected { background: #e7ede4; color: #48634c; border-radius: 5px; margin-left: 6px; padding: 2px 4px; display: inline-block; }
   .empty-inline { font-size: 11px; color: var(--muted); padding: 8px 0; }
   .danger-text { color: #913724; background: #f8ebe5; }
@@ -555,6 +561,9 @@
   .batch-list input, .catalog-controls input, .catalog-preview input { accent-color: #914331; }
   .batch-progress { font-size: 11px; color: #425846; display: grid; gap: 4px; }
   .batch-progress progress { width: 100%; accent-color: #4d7057; }
+  .batch-dock { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 12px; color: #314d39; background: #edf2e9; border: 1px solid #cbd9cb; border-radius: 10px; }
+  .batch-dock-status { display: grid; min-width: 0; gap: 4px; font-size: 12px; overflow-wrap: anywhere; }
+  .batch-dock-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
   @media (max-width: 900px) {
     .board { grid-template-columns: minmax(0, 1fr); }
     .board .detail-panel { position: static; }

@@ -14,16 +14,17 @@ import { CatalogDialog } from './catalog-dialog';
 import { applyCatalog, planCatalog, tiktokId } from './catalog';
 import { BatchDialog } from './batch-dialog';
 import { offerWarnings } from './audit';
-import { analyzeStoredClip, failScan, scanReceipt, type BatchEvent } from './batch';
+import { analyzeStoredClip, failScan, lastScanDetail, scanReceipt, type BatchEvent } from './batch';
 import {
-  changeEvidence, leadVerdict, prepareWorkspace, queueEntries, recordAudit, reviewOpen, setFindingNote, setReviews, updatedReport,
+  changeEvidence, confirmSpeechDrafts, leadVerdict, prepareWorkspace, queueEntries, recordAudit, reviewOpen, setFindingNote,
+  setReviews, updatedReport, type SpeechDraftEdit,
 } from './workflow';
 import { ClipDialog, ConfirmOfferImport, OfferDialog, type DraftClip } from './dialogs';
 import { findDuplicateVideos, inspectUploads, type DuplicateChoice } from './duplicates';
 import { displayDate, displayDateTime, localTime, verdictLabels } from './domain';
 import type { Campaign, CampaignDraft, Clip, Evidence, Finding, Offer, Review, Verdict, Workspace } from './domain';
 import { auditCsv, download, downloadBlob, importOffers } from './files';
-import { analyzeVideo, videoMetadata, type ScanOptions } from './media';
+import { analyzeVideo, speechIsReady, videoMetadata, type ScanOptions } from './media';
 import { emptyWorkspace, refreshDemo, sampleWorkspace } from './demo';
 import { OffersView } from './offers';
 import { latestOfferImpact } from './impact';
@@ -119,7 +120,11 @@ export function App() {
   const [boardFocus, setBoardFocus] = useState<{ id: 'clip-evidence' | 'clip-list-heading' }>();
   const todo = useMemo(() => workspace ? queueEntries(workspace).filter(row => reviewOpen(row.review)).length : 0, [workspace]);
   const impact = useMemo(() => workspace && page === 'offers' ? latestOfferImpact(workspace) : undefined, [workspace, page]);
-  const [busy, setBusy] = useState('');
+  const [operation, setBusy] = useState('');
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchPanel, setBatchPanel] = useState<{ id: string; clipId?: string }>();
+  const batchActive = useRef(false);
+  const busy = operation || (batchRunning ? 'Đang quét video hàng loạt…' : '');
   const [notice, setNotice] = useState<Notice | null>(null);
   const [deleted, setDeleted] = useState<DeletedVideo>();
   const cancel = useRef<AbortController | null>(null);
@@ -130,7 +135,7 @@ export function App() {
   const pageHeading = useRef<HTMLHeadingElement>(null);
 
   async function open(id: string) {
-    if (writing.current || opening.current) throw Error('Chờ thao tác hiện tại trước khi chuyển chiến dịch.');
+    if (writing.current || opening.current || batchActive.current) throw Error('Chờ thao tác hiện tại trước khi chuyển chiến dịch.');
     opening.current = true;
     setBusy('Đang mở chiến dịch…');
     try {
@@ -193,7 +198,8 @@ export function App() {
     return () => { observer.disconnect(); root.style.removeProperty('--mobile-scroll-top'); };
   }, [ready]);
 
-  async function persist(next: Workspace, media?: MediaChange[]) {
+  async function persist(next: Workspace, media?: MediaChange[], fromBatch = false) {
+    if (batchActive.current && !fromBatch) throw Error('Chờ lượt quét nền hoàn tất trước khi thay đổi chiến dịch.');
     if (writing.current) throw Error('Đang lưu thay đổi. Thử lại sau khi lưu xong.');
     writing.current = true;
     try {
@@ -214,7 +220,16 @@ export function App() {
   }
 
   function notify(text: string, error = false) { setNotice({ text, error }); }
-  function startAdd() { setNotice(null); setEditing(undefined); setFocusSubtitles(false); setDialog('clip'); }
+  function startAdd() {
+    if (busy) return;
+    setNotice(null); setEditing(undefined); setFocusSubtitles(false); setDialog('clip');
+  }
+  function startBatch(clip?: Clip) {
+    if (busy) return;
+    setNotice(null);
+    setBatchPanel({ id: crypto.randomUUID(), clipId: clip?.id });
+    setDialog('batch');
+  }
   function go(next: Page, creator?: string) {
     setPage(next); setFilter('all'); setClipFilters(allClipFilters); setFindingFocus(''); setShowDetail(false);
     setQueueCreator(creator);
@@ -258,13 +273,18 @@ export function App() {
     focusBoard('clip-evidence');
   }
   function startEvidence(clip: Clip, index: number | null) {
+    if (busy) return;
     setEditing(clip); setEvidenceIndex(index); setDialog('evidence');
   }
   function startEdit(clip: Clip, subtitles = false) {
+    if (busy) return;
     setNotice(null); setEditing(clip); setFocusSubtitles(subtitles); setDialog('clip');
   }
-  function startDelete(clip: Clip) { setEditing(clip); setDialog('delete'); }
-  function clearDialog() { setDialog(null); setEditing(undefined); setOfferImport(undefined); }
+  function startDelete(clip: Clip) { if (!busy) { setEditing(clip); setDialog('delete'); } }
+  function clearDialog() {
+    if (dialog === 'batch') setBatchPanel(undefined);
+    setDialog(null); setEditing(undefined); setOfferImport(undefined);
+  }
 
   if (!workspace) return <div className="boot"><Brand /><p role="status">Đang mở Rà Clip…</p>
     {notice && <p className="form-error" role="alert">{notice.text}</p>}</div>;
@@ -328,6 +348,7 @@ export function App() {
   }
 
   async function handleImport(file: File) {
+    if (batchActive.current) return;
     setBusy('Đang đọc bảng ưu đãi…');
     try {
       const offers = await importOffers(file);
@@ -367,39 +388,54 @@ export function App() {
   }
 
   async function scanBatch(ids: string[], options: ScanOptions, signal: AbortSignal, onEvent: (event: BatchEvent) => void) {
-    let current = data;
-    const processed = new Set<string>();
-    let success = 0;
-    let warnings = 0;
-    for (const id of ids) {
-      if (signal.aborted) break;
-      const clip = current.clips.find(row => row.id === id);
-      if (!clip) continue;
-      onEvent({ id, state: 'running', detail: 'Đang mở file video…' });
-      let next: Clip;
-      try {
-        next = await analyzeStoredClip(clip, options, signal, detail => onEvent({ id, state: 'running', detail }));
-      } catch (failure) {
-        if (signal.aborted) {
-          onEvent({ id, state: 'stopped', detail: 'Dừng trước khi lưu kết quả video này.' });
-          break;
+    if (busy || batchActive.current || opening.current || writing.current) throw Error('Đợi thao tác hiện tại hoàn tất trước khi quét.');
+    batchActive.current = true;
+    setBatchRunning(true);
+    setNotice(null);
+    try {
+      let current = data;
+      const processed = new Set<string>();
+      let success = 0;
+      let warnings = 0;
+      for (const id of ids) {
+        if (signal.aborted) break;
+        const clip = current.clips.find(row => row.id === id);
+        if (!clip) continue;
+        onEvent({ id, state: 'running', detail: 'Đang mở file video…' });
+        let next: Clip;
+        try {
+          next = await analyzeStoredClip(clip, options, signal, detail => onEvent({ id, state: 'running', detail }));
+        } catch (failure) {
+          if (signal.aborted) {
+            onEvent({ id, state: 'stopped', detail: 'Dừng trước khi lưu kết quả video này.' });
+            break;
+          }
+          next = failScan(clip, options, errorText(failure));
         }
-        next = failScan(clip, options, errorText(failure));
+        const receipt = next.lastScan!;
+        const clips = current.clips.map(row => row.id === id ? next : row);
+        current = await persist(updatedReport({ ...current, clips }, 'batch', false), undefined, true);
+        for (const refreshed of current.audit?.refreshed ?? []) processed.add(refreshed);
+        if (receipt.state === 'ready') success++;
+        else warnings++;
+        onEvent({ id, state: receipt.state, detail: lastScanDetail(next) ?? receipt.detail, duration: next.duration,
+          usableTiming: receipt.state !== 'failed' &&
+            (!options.audio || speechIsReady() && receipt.sources?.audio?.state !== 'failed') &&
+            (!options.frame || receipt.sources?.frame?.state !== 'failed') });
       }
-      const receipt = next.lastScan!;
-      const clips = current.clips.map(row => row.id === id ? next : row);
-      current = await persist(updatedReport({ ...current, clips }, 'batch', false));
-      for (const refreshed of current.audit?.refreshed ?? []) processed.add(refreshed);
-      if (receipt.state === 'ready') success++;
-      else warnings++;
-      onEvent({ id, state: receipt.state, detail: receipt.detail, duration: next.duration });
+      if (current.audit && success + warnings > 0) {
+        await persist(recordAudit({ ...current, audit: { ...current.audit, refreshed: [...processed] } }, 'batch'), undefined, true);
+      }
+      const label = signal.aborted ? 'Đã dừng lượt quét.' : 'Đã xong lượt quét.';
+      const reminder = !current.demo && success + warnings >= 10 ? ' Có thể tải bản sao lưu trong Quản lý chiến dịch.' : '';
+      notify(`${label} ${success} video có kết quả · ${warnings} cần xem lại.${reminder}`);
+    } catch (error) {
+      notify(errorText(error), true);
+      throw error;
+    } finally {
+      batchActive.current = false;
+      setBatchRunning(false);
     }
-    if (current.audit && success + warnings > 0) {
-      await persist(recordAudit({ ...current, audit: { ...current.audit, refreshed: [...processed] } }, 'batch'));
-    }
-    const label = signal.aborted ? 'Đã dừng lượt quét.' : 'Đã xong lượt quét.';
-    const reminder = !current.demo && success + warnings >= 10 ? ' Có thể tải bản sao lưu trong Quản lý chiến dịch.' : '';
-    notify(`${label} ${success} video có kết quả · ${warnings} cần xem lại.${reminder}`);
   }
 
   async function saveClips(drafts: DraftClip[], options: ScanOptions, choice: DuplicateChoice) {
@@ -473,6 +509,7 @@ export function App() {
   }
 
   async function rescan(clip: Clip, options: ScanOptions = { audio: true, frame: true }) {
+    if (busy || batchActive.current) return;
     const controller = new AbortController();
     cancel.current = controller;
     setBusy('Đang mở video…');
@@ -487,7 +524,7 @@ export function App() {
       setBusy('Đang lưu bằng chứng…');
       cancel.current = null;
       await persist(updatedReport({ ...data, clips }, 'evidence'));
-      notify(next.lastScan!.detail, next.lastScan!.state !== 'ready');
+      notify(lastScanDetail(next) ?? next.lastScan!.detail, next.lastScan!.state !== 'ready');
     } catch (error) { notify(controller.signal.aborted ? 'Đã dừng phân tích video.' : errorText(error), !controller.signal.aborted); }
     finally { setBusy(''); cancel.current = null; }
   }
@@ -537,6 +574,15 @@ export function App() {
     await persist(updatedReport({ ...data, clips }, 'evidence'));
     clearDialog();
     notify(value ? 'Đã lưu đoạn trích và cập nhật kết quả.' : 'Đã xóa đoạn trích và cập nhật kết quả.');
+  }
+
+  async function saveSpeechDrafts(clip: Clip, drafts: SpeechDraftEdit[]) {
+    const current = data.clips.find(row => row.id === clip.id);
+    if (busy || !current) throw Error('Chờ lượt xử lý hiện tại rồi mở lại phần Bằng chứng.');
+    const fixed = confirmSpeechDrafts(current, drafts);
+    const clips = data.clips.map(row => row.id === fixed.id ? fixed : row);
+    await persist(updatedReport({ ...data, clips }, 'evidence'));
+    notify(`Đã lưu ${drafts.length} đoạn lời thoại và cập nhật kết quả.`);
   }
 
   async function review(ids: string[], value: Review | '') {
@@ -633,18 +679,21 @@ export function App() {
               Xem bằng chứng <ArrowRight size={16} aria-hidden="true" />
             </button>}
         </div>
+        {batchPanel && <BatchDialog key={batchPanel.id} clips={data.clips} initialClipId={batchPanel.clipId}
+          visible={dialog === 'batch'} onRun={scanBatch} onClose={clearDialog}
+          onHide={() => setDialog(null)} onShow={() => setDialog('batch')} />}
         {page === 'report' && (data.demo
           ? <DemoStart onExample={example ? () => openFinding(example.clip, example.finding) : undefined}
             onShop={() => openShop('report')}
             onGuide={() => go('guide')} busy={!!busy} />
           : <ShopStart version={version} clips={data.clips} hasReport={results.length > 0} busy={!!busy}
             onOffers={() => go('offers')} onAdd={startAdd} onEdit={startEdit}
-            onScan={clip => { setEditing(clip); setDialog('batch'); }}
+            onScan={startBatch}
             onResults={() => { setFilter('all'); setClipFilters(allClipFilters); setShowDetail(false); focusBoard('clip-list-heading'); }} />)}
         {page === 'report' && <section className="report-tool-links" aria-label="Công cụ theo nhu cầu">
           <ToolLinks onOpen={go} />
         </section>}
-        {busy && !dialog && <div className="inline-status" role="status"><LoaderCircle size={17} className="spin" /> {busy}
+        {busy && !dialog && !batchRunning && <div className="inline-status" role="status"><LoaderCircle size={17} className="spin" /> {busy}
           {cancel.current && <button className="text-button" onClick={() => cancel.current?.abort()}>Dừng</button>}
         </div>}
         {page === 'report' && (data.demo || data.clips.length > 0) && <>
@@ -679,7 +728,7 @@ export function App() {
               onClick={() => duplicateIds ? setDuplicateIds(undefined) : void checkDuplicates()}>
               {duplicateIds ? 'Hiện tất cả video' : 'Tìm video trùng'}</button>
             <button className="button dark" disabled={!!busy || !data.clips.some(clip => clip.localMedia || clip.demoMedia)}
-              onClick={() => setDialog('batch')}><ScanLine size={16} /> Quét hàng loạt</button></div>
+              onClick={() => startBatch()}><ScanLine size={16} /> Quét hàng loạt</button></div>
         </section>}
         {(page === 'report' || page === 'clips') && <div className={`board${currentClip ? (showDetail ? ' showing-detail' : '') : ' single-column'}`}>
           {page === 'report' && filter !== 'all' && <div className="filter-strip">Đang lọc: {verdictLabels[filter]}
@@ -689,8 +738,9 @@ export function App() {
             onSelect={selectClip} onAdd={startAdd} library={page === 'clips'} ready={!!data.audit} />
           {currentClip && <ClipDetail key={currentClip.id + '|' + findingFocus} clip={currentClip} result={resultIndex.get(currentClip.id)}
             focusedFinding={findingFocus} reviews={data.reviews} notes={data.notes} onReview={(id, value) => void review([id], value)}
-            onEdit={startEdit} onDelete={startDelete} onEvidence={startEvidence}
+            onEdit={startEdit} onDelete={startDelete} onEvidence={startEvidence} onConfirmDrafts={saveSpeechDrafts}
             hasSku={Boolean(version?.offers.some(offer => offer.sku === currentClip.sku))}
+            shopTerms={version?.offers.filter(offer => offer.sku === currentClip.sku).flatMap(offer => [offer.sku, offer.name]) ?? []}
             onOffers={() => go('offers')} onScan={(clip, options) => void rescan(clip, options)}
             onBack={() => { setShowDetail(false); focusBoard('clip-list-heading'); }} busy={!!busy} />}
         </div>}
@@ -713,7 +763,7 @@ export function App() {
         </>}
         {page === 'guide' && <Guide onOffers={() => go('offers')} onAdd={startAdd} onReport={() => go('report')} />}
         {page === 'tools' && <ToolLinks onOpen={go} />}
-        {page === 'quick' && <QuickCheck />}
+        {page === 'quick' && <QuickCheck batchRunning={batchRunning} />}
         {data.demo && (page === 'schedule' || page === 'creators') && <div className="tool-demo-note">
           <span>Đang xem dữ liệu minh họa.</span>
           <button type="button" className="button secondary" onClick={() => openShop(page)} disabled={!!busy}>Dùng dữ liệu của bạn <ArrowRight size={16} /></button>
@@ -734,7 +784,6 @@ export function App() {
       onClose={clearDialog} onSave={saveClips} busy={busy} onCancel={() => cancel.current?.abort()}
       onOpen={clip => { clearDialog(); setClipFilters(allClipFilters); setFilter('all'); selectClip(clip.id); }} />}
     {dialog === 'catalog' && <CatalogDialog clips={data.clips} onApply={importCatalog} onClose={clearDialog} />}
-    {dialog === 'batch' && <BatchDialog clips={data.clips} initialClipId={editing?.id} onRun={scanBatch} onClose={clearDialog} />}
     {dialog === 'campaigns' && <CampaignManager items={campaigns} active={active} onOpen={launchCampaign}
       onCreate={addCampaign} onRename={changeCampaign} onBackup={exportCampaign} onRestore={restoreCampaign} onClose={clearDialog} />}
     {dialog === 'evidence' && <EvidenceDialog row={evidenceIndex === null ? undefined : editing?.evidence[evidenceIndex]}
