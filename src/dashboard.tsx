@@ -208,7 +208,8 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
   const active = findings.find(row => row.id === findingId) ?? findings[0];
   const activeReview = active ? reviews[active.id] : undefined;
   const playable = clip.localMedia || Boolean(clip.demoMedia);
-  const coverage = active?.kind === 'coverage' && !active.evidence ? coverageHelp(clip, hasSku) : undefined;
+  const coverage = active && ((!hasSku && active.verdict === 'review') || (active.kind === 'coverage' && !active.evidence))
+    ? coverageHelp(clip, hasSku) : undefined;
   const unclearEvidence = active?.kind === 'coverage' ? active.evidence : undefined;
   const unclearIndex = unclearEvidence ? clip.evidence.findIndex(row => row.source === unclearEvidence.source &&
     row.start === unclearEvidence.start && row.text === unclearEvidence.text) : -1;
@@ -220,10 +221,11 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
     requestAnimationFrame(() => document.getElementById('timeline-heading')?.focus());
   }
 
-  const step = unclearIndex >= 0 ? 'correct' : coverage?.action ?? (!hasSku ? 'sku' : active?.reason.includes('ngày đăng') ? 'edit' : 'offers');
+  const step = coverage?.action ?? (unclearIndex >= 0 ? 'correct' : active?.reason.includes('ngày đăng') ? 'edit' : 'offers');
   const nextAction = {
-    sku: { label: 'Gán lại mã sản phẩm', run: () => onEdit(clip) },
-    audio: { label: playable ? 'Thử lại lời thoại' : 'Bổ sung phụ đề', run: () => playable ? onScan(clip, { audio: true, frame: false }) : onEdit(clip) },
+    sku: { label: clip.sku ? 'Gán lại mã sản phẩm' : 'Gán mã sản phẩm', run: () => onEdit(clip) },
+    audio: { label: playable ? clip.lastScan?.audio || clip.lastScan?.sources?.audio ? 'Thử lại lời thoại' : 'Quét lời thoại' : 'Bổ sung phụ đề',
+      run: () => playable ? onScan(clip, { audio: true, frame: false }) : onEdit(clip) },
     segments: { label: 'Xem các đoạn đã đọc', run: () => openSegments() },
     scan: { label: 'Quét video này', run: () => onScan(clip) },
     correct: { label: 'Sửa đoạn lời thoại', run: () => onEvidence(clip, unclearIndex) },
@@ -256,6 +258,9 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
     </div>
     <div className="detail-content">
       <ClipPlayer clip={clip} jump={jump} />
+      {!playable && clip.link && <button className="text-button scan-video" type="button" onClick={() => onEdit(clip)} disabled={busy}>
+        <FileVideo size={15} aria-hidden="true" /> Gắn file video hoặc phụ đề
+      </button>}
       {playable && <button className="text-button scan-video" type="button" onClick={() => onScan(clip)} disabled={busy}><ScanLine size={15} /> Phân tích video bằng AI</button>}
       <div className="segmented evidence-tabs" role="group" aria-label="Xem bằng chứng">
         <button type="button" className={tab === 'results' ? 'active' : ''} aria-pressed={tab === 'results'} onClick={() => setTab('results')}>Phát hiện</button>
@@ -295,7 +300,7 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
       {(clip.creator || clip.stats) && <div className="clip-stats"><strong>Số liệu đã nhập</strong>
         {[clip.creator, clip.stats?.views === undefined ? '' : numberLabel(clip.stats.views) + ' lượt xem',
           clip.stats?.orders === undefined ? '' : numberLabel(clip.stats.orders) + ' đơn'].filter(Boolean).join(' · ')}</div>}
-      {(clip.lastScan || clip.evidence.length > 0) && <div className="clip-scan-summary">
+      {(playable || clip.lastScan || clip.evidence.length > 0) && <div className="clip-scan-summary">
         <strong>Nguồn bằng chứng</strong>
         <ul className="evidence-sources">{sourceKeys.map(source => {
           const count = clip.evidence.filter(entry => entry.source === source).length;
@@ -303,7 +308,7 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
           if (!count && !outcome && source !== 'audio' && source !== 'frame') return null;
           return <li key={source}>
             {count ? <button type="button" className="text-button" onClick={() => openSegments(source)}>{sourceLabels[source]} · {count} đoạn</button>
-              : <span>{sourceLabels[source]} · {outcome ? '0 đoạn' : 'Chưa có kết quả'}</span>}
+              : <span>{sourceLabels[source]} · {outcome ? '0 đoạn giữ lại' : 'Chưa quét'}</span>}
             {outcome && <small>{outcome.detail}</small>}
           </li>;
         })}</ul>

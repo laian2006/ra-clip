@@ -61,18 +61,52 @@ function prices(text: string): number[] {
   return [...result];
 }
 
-export function giftKey(value: string) {
-  return fold(value).replace(/\b(?:qua\s+tang|tang\s+kem|tang\s+them|tang|mot|1|cai|chiec)\b/g, ' ')
+function namedGiftKey(value: string) {
+  return value.replace(/\b(?:qua\s+tang|tang\s+kem|tang\s+them|tang|mot|1|cai|chiec)\b/g, ' ')
     .replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
+const quantity = `(?:[0-9]+|${sequence}(?:\\s+${sequence}){0,5})`;
+const buyGift = new RegExp(
+  `\\bmua\\s+(${quantity})\\s*(?:[+,:;–—-]+\\s*|thi\\s+)?\\btang\\s+(?:(?:kem|them|ngay)\\s+)?(${quantity})(?![a-z0-9])`,
+  'g',
+);
+
+function purchaseGifts(value: string) {
+  return [...value.matchAll(buyGift)].flatMap(match => {
+    const start = match.index!;
+    const end = start + match[0].length;
+    const rawTail = value.slice(end).split(/[\r\n.,!?;:]/, 1)[0].trim();
+    const tail = rawTail.replace(/^(?:cai|chiec|san\s+pham)\b\s*/, '');
+    if (tail && !/^(?:khi|neu|cho|trong|den|nha|nhe|luon|day|do|a|va|roi|tiep)\b/.test(tail)) return [];
+    const count = (text: string) => /^\d+$/.test(text) ? Number(text) : spokenNumber(text.replace(/\s+/g, ' '));
+    const buy = count(match[1]);
+    const gift = count(match[2]);
+    if (!buy || !gift || !Number.isSafeInteger(buy) || !Number.isSafeInteger(gift)) return [];
+    const negated = /\b(?:khong(?:\s+(?:co|con))?|het)\s*$/.test(value.slice(0, start));
+    return [{ start, end, negated, text: `Mua ${buy} tặng ${gift}`, key: `mua:${buy}:tang:${gift}` }];
+  });
+}
+
+export function giftKey(value: string) {
+  const text = fold(value.normalize('NFC')).trim();
+  const purchase = purchaseGifts(text)[0];
+  return purchase?.start === 0 && !purchase.negated ? purchase.key : namedGiftKey(text);
+}
+
 function giftClaims(text: string) {
-  const gifts = [];
+  const normalized = text.normalize('NFC');
+  const purchases = purchaseGifts(fold(normalized));
+  let rest = normalized;
+  for (const { start, end } of [...purchases].reverse()) rest = rest.slice(0, start) + ' ' + rest.slice(end);
+  const gifts = purchases.filter(promo => !promo.negated).map(promo => ({
+    value: promo.text, conditional: conditionPattern.test(fold(rest)),
+  }));
   const pattern = /\btặng\s+(?:(?:kèm|thêm|ngay)\s+)?([^\n.!?;,:]+?)(?=\s+(?:khi|nếu|cho|trong\s+ngày|đến\s+hết)\b|[\n.!?;,:]|$)/giu;
-  for (const match of text.matchAll(pattern)) {
+  for (const match of rest.matchAll(pattern)) {
     const value = match[1].trim();
     if (value && giftKey(value) && !/^(?:từ|giá|voucher|mã|[\d.,]+\s*(?:k|nghìn|ngàn|đồng|%))/i.test(value)) {
-      gifts.push(value);
+      gifts.push({ value, conditional: conditionPattern.test(fold(normalized)) });
     }
   }
   return gifts;
@@ -126,17 +160,17 @@ export function extractClaims(clip: Clip, offers: Offer[]) {
     const code = contextCodes.length === 1 ? contextCodes[0] : '';
     const disclosure = readDisclosure(text, clip.published) || readDisclosure(fold(context), clip.published);
     const conditional = conditionPattern.test(text);
-    const candidates: Array<Pick<Claim, 'kind' | 'value' | 'code'>> = [
-      ...codes.map(value => ({ kind: 'code' as const, value, code: value })),
-      ...prices(fold(segment.text.normalize('NFC').replace(/\bngăn\b/gi, 'khoang'))).map(value => ({ kind: 'price' as const, value, code })),
-      ...giftClaims(segment.text).map(value => ({ kind: 'gift' as const, value, code })),
+    const candidates: Array<Pick<Claim, 'kind' | 'value' | 'code' | 'conditional'>> = [
+      ...codes.map(value => ({ kind: 'code' as const, value, code: value, conditional })),
+      ...prices(fold(segment.text.normalize('NFC').replace(/\bngăn\b/gi, 'khoang'))).map(value => ({ kind: 'price' as const, value, code, conditional })),
+      ...giftClaims(segment.text).map(gift => ({ ...gift, kind: 'gift' as const, code })),
     ];
     for (const candidate of candidates) {
       const value = candidate.kind === 'gift' ? giftKey(String(candidate.value)) : candidate.value;
-      const key = JSON.stringify([candidate.kind, value, candidate.code, disclosure, conditional, segment.untimed]);
+      const key = JSON.stringify([candidate.kind, value, candidate.code, disclosure, candidate.conditional, segment.untimed]);
       if (seen.has(key)) continue;
       seen.add(key);
-      claims.push({ ...candidate, disclosure, conditional, evidence: segment });
+      claims.push({ ...candidate, disclosure, evidence: segment });
     }
   }
   return claims;

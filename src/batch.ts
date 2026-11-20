@@ -21,18 +21,20 @@ export function needsScan(clip: Clip, options?: ScanOptions) {
 export function scanReceipt(options: ScanOptions, result: Awaited<ReturnType<typeof analyzeVideo>>): ScanReceipt {
   const notes = Object.entries(result.sources).map(([source, outcome]) =>
     `${sourceLabels[source as 'audio' | 'frame']} · ${outcome.detail}`);
-  const states = Object.values(result.sources).map(outcome => outcome.state);
+  const states = Object.values(result.sources);
   return {
     ...options, at: localTime(), sources: result.sources,
-    state: result.evidence.length ? states.every(state => state === 'done') ? 'ready' : 'partial'
-      : states.includes('failed') ? 'failed' : 'empty',
+    state: result.evidence.length ? states.every(source => source.state === 'done' && !source.discarded) ? 'ready' : 'partial'
+      : states.some(source => source.state === 'failed') ? 'failed' : 'empty',
     detail: notes.join(' ').slice(0, 1600),
   };
 }
 
 export function completeScan(clip: Clip, options: ScanOptions, result: Awaited<ReturnType<typeof analyzeVideo>>): Clip {
   const receipt = scanReceipt(options, result);
-  return { ...mergeScan(clip, result.evidence), lastScan: {
+  const oldEvidence = clip.evidence.filter(row => row.corrected || (row.source !== 'audio' && row.source !== 'frame') ||
+    !result.sources[row.source] || result.sources[row.source]?.state === 'failed');
+  return { ...mergeScan({ ...clip, evidence: oldEvidence }, result.evidence), lastScan: {
     ...receipt, sources: { ...clip.lastScan?.sources, ...receipt.sources },
   } };
 }

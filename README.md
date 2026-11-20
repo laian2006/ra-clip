@@ -4,6 +4,8 @@ Kiểm bản nháp trước khi đăng và rà lại video bán hàng khi giá, 
 
 ![Màn hình rà soát với dữ liệu mẫu](docs/giao-dien.png)
 
+[Ghi chú phát hành 1.5.1 và trạng thái các mục trong báo cáo kiểm thử](docs/ban-phat-hanh-1.5.1.md).
+
 ## Chạy trên web
 
 Mở [Rà Clip trên GitHub Pages](https://laian2006.github.io/ra-clip/) để thử với dữ liệu mẫu hoặc dữ liệu của bạn. Sau khi cập nhật `main`, GitHub Actions kiểm thử và đưa bản build đạt kiểm thử lên web.

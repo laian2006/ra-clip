@@ -23,12 +23,21 @@ export function CampaignManager({ items, active, onOpen, onCreate, onRename, onB
   const [shop, setShop] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [backupStatus, setBackupStatus] = useState('');
   const [storage, setStorage] = useState<{ usage: number; quota: number }>();
+  const [estimating, setEstimating] = useState(true);
   useEffect(() => {
     let mounted = true;
-    void navigator.storage?.estimate?.().then(({ usage, quota }) => {
-      if (mounted && usage !== undefined && quota && Number.isFinite(quota)) setStorage({ usage, quota });
-    }).catch(() => {});
+    async function estimate() {
+      try {
+        const result = await navigator.storage?.estimate?.();
+        if (mounted && result && Number.isFinite(result.usage) && Number.isFinite(result.quota) && result.quota! > 0) {
+          setStorage({ usage: result.usage!, quota: result.quota! });
+        }
+      } catch { /* Storage estimates are optional. */ }
+      finally { if (mounted) setEstimating(false); }
+    }
+    void estimate();
     return () => { mounted = false; };
   }, []);
 
@@ -43,6 +52,7 @@ export function CampaignManager({ items, active, onOpen, onCreate, onRename, onB
   async function apply(action: () => Promise<void>) {
     setBusy(true);
     setError('');
+    setBackupStatus('');
     try { await action(); }
     catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
@@ -59,12 +69,17 @@ export function CampaignManager({ items, active, onOpen, onCreate, onRename, onB
     });
   }
 
+  const ratio = storage ? storage.usage / storage.quota : 0;
   return <Modal title="Quản lý chiến dịch" detail="Mỗi chiến dịch có bảng ưu đãi, kho video và lịch sử riêng." busy={busy} onClose={onClose}>
     <div className="campaign-dialog">
-      {storage && <p className={storage.usage / storage.quota >= 0.85 ? 'form-error' : 'hint-text'}>
-        Bộ nhớ trình duyệt cho Rà Clip dùng khoảng {sizeLabel(storage.usage)} trên {sizeLabel(storage.quota)}.
-        {storage.usage / storage.quota >= 0.85 && ' Dung lượng gần đầy. Sao lưu chiến dịch trước khi thêm video.'}
-      </p>}
+      <section className="campaign-storage" aria-labelledby="storage-title">
+        <h3 id="storage-title">Dung lượng trên trình duyệt</h3>
+        {storage ? <>
+          <meter min={0} max={1} high={0.85} optimum={0} value={Math.min(ratio, 1)} aria-labelledby="storage-title" />
+          <p className="hint-text">Đã dùng khoảng {sizeLabel(storage.usage)} / {sizeLabel(storage.quota)} · còn khoảng {sizeLabel(Math.max(0, storage.quota - storage.usage))}.</p>
+          {ratio >= 0.85 && <p className="form-error" role="alert">Dung lượng gần đầy. Sao lưu chiến dịch trước khi thêm video.</p>}
+        </> : <p className="hint-text">{estimating ? 'Đang ước tính dung lượng…' : 'Trình duyệt chưa cung cấp số liệu dung lượng.'}</p>}
+      </section>
       {showForm ? <form className="campaign-form" onSubmit={submit}>
         <div className="form-grid">
           <label>Tên chiến dịch<input value={name} onChange={event => setName(event.target.value)} maxLength={80} required
@@ -86,13 +101,17 @@ export function CampaignManager({ items, active, onOpen, onCreate, onRename, onB
         </label>
       </div>}
       {error && <p className="form-error" role="alert"><CircleAlert size={16} /> {error}</p>}
+      {backupStatus && <p className="progress-message" role="status">{backupStatus}</p>}
       <div className="campaign-list">
         {items.map(item => <div className={`campaign-card ${active === item.id ? 'active' : ''}`} key={item.id}>
           <div className="campaign-card-icon"><Clapperboard size={19} /></div>
           <div className="campaign-card-label"><strong>{item.name}</strong>
             <small>{item.shop && item.shop + ' · '}{item.clipCount} video · {item.todoCount} việc đang mở</small></div>
           <button className="icon-button" disabled={busy} title="Đổi tên" aria-label={`Đổi tên ${item.name}`} onClick={() => edit(item)}><Pencil size={15} /></button>
-          <button className="icon-button" disabled={busy} title="Sao lưu" aria-label={`Sao lưu ${item.name}`} onClick={() => void apply(() => onBackup(item.id))}><Download size={15} /></button>
+          <button className="icon-button" disabled={busy} title="Sao lưu" aria-label={`Sao lưu ${item.name}`} onClick={() => void apply(async () => {
+            await onBackup(item.id);
+            setBackupStatus(`Đã kiểm tra khả năng mở bản sao lưu của “${item.name}” và bắt đầu tải file.`);
+          })}><Download size={15} /></button>
           <button className="icon-button" disabled={busy} title="Mở chiến dịch" aria-label={`Mở ${item.name}`} onClick={() => void apply(() => onOpen(item.id))}><ArrowUpRight size={16} /></button>
         </div>)}
       </div>

@@ -48,6 +48,7 @@ export interface ScanReceipt {
 export interface ScanSource {
   state: 'done' | 'empty' | 'failed';
   detail: string;
+  discarded?: number;
 }
 
 export const scanLabels: Record<ScanReceipt['state'], string> = {
@@ -114,6 +115,7 @@ export interface Audit {
   checkedAt: string;
   results: ClipResult[];
   refreshed: string[];
+  rulesVersion?: number;
 }
 
 export type AuditTrigger = 'manual' | 'offers' | 'clips' | 'evidence' | 'batch' | 'baseline';

@@ -77,6 +77,7 @@ test('a campaign backup restores a separate campaign and its actual video file',
   await page.getByRole('button', { name: 'Sao lưu Chiến dịch 12.12' }).click();
   const download = await file;
   expect(download.suggestedFilename()).toMatch(/\.raclip$/);
+  await expect(page.getByRole('dialog').getByRole('status')).toContainText('Đã kiểm tra khả năng mở bản sao lưu');
   await page.getByLabel('Mở bản sao lưu').setInputFiles({
     name: download.suggestedFilename(), mimeType: 'application/octet-stream', buffer: await readFile((await download.path())!),
   });

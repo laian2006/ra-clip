@@ -13,11 +13,12 @@ import { makeBackup, readBackup } from './backup';
 import { CatalogDialog } from './catalog-dialog';
 import { applyCatalog, planCatalog, tiktokId } from './catalog';
 import { BatchDialog } from './batch-dialog';
+import { offerWarnings } from './audit';
 import { analyzeStoredClip, failScan, scanReceipt, type BatchEvent } from './batch';
 import {
   changeEvidence, leadVerdict, prepareWorkspace, queueEntries, recordAudit, reviewOpen, setFindingNote, setReviews, updatedReport,
 } from './workflow';
-import { ClipDialog, OfferDialog, type DraftClip } from './dialogs';
+import { ClipDialog, ConfirmOfferImport, OfferDialog, type DraftClip } from './dialogs';
 import { findDuplicateVideos, inspectUploads, type DuplicateChoice } from './duplicates';
 import { displayDate, displayDateTime, localTime, verdictLabels } from './domain';
 import type { Campaign, CampaignDraft, Clip, Evidence, Finding, Offer, Review, Verdict, Workspace } from './domain';
@@ -107,7 +108,8 @@ export function App() {
   const [duplicateIds, setDuplicateIds] = useState<Set<string>>();
   const [selected, setSelected] = useState('');
   const [date, setDate] = useState('');
-  const [dialog, setDialog] = useState<'clip' | 'offers' | 'delete' | 'campaigns' | 'evidence' | 'catalog' | 'batch' | 'impact' | 'impact-handoff' | 'brief' | null>(null);
+  const [dialog, setDialog] = useState<'clip' | 'offers' | 'verify-offers' | 'delete' | 'campaigns' | 'evidence' | 'catalog' | 'batch' | 'impact' | 'impact-handoff' | 'brief' | null>(null);
+  const [offerImport, setOfferImport] = useState<{ offers: Offer[]; warnings: string[] }>();
   const [queueCreator, setQueueCreator] = useState<string>();
   const [editing, setEditing] = useState<Clip>();
   const [evidenceIndex, setEvidenceIndex] = useState<number | null>(null);
@@ -259,7 +261,7 @@ export function App() {
   }
   function startEdit(clip: Clip) { setNotice(null); setEditing(clip); setDialog('clip'); }
   function startDelete(clip: Clip) { setEditing(clip); setDialog('delete'); }
-  function clearDialog() { setDialog(null); setEditing(undefined); }
+  function clearDialog() { setDialog(null); setEditing(undefined); setOfferImport(undefined); }
 
   if (!workspace) return <div className="boot"><Brand /><p role="status">Đang mở Rà Clip…</p>
     {notice && <p className="form-error" role="alert">{notice.text}</p>}</div>;
@@ -296,10 +298,10 @@ export function App() {
   async function exportCampaign(id: string) {
     const details = campaigns.find(item => item.id === id);
     if (!details) throw Error('Không tìm thấy thông tin chiến dịch.');
-    const saved = await loadWorkspace(id) ?? emptyWorkspace();
+    const saved = prepareWorkspace(await loadWorkspace(id) ?? emptyWorkspace());
     const file = await makeBackup({ name: details.name, shop: details.shop }, saved, loadMedia);
+    await readBackup(file);
     downloadBlob(file, `ra-clip-${localTime().slice(0, 10)}.raclip`);
-    notify('Đã tạo file sao lưu kèm video.');
   }
 
   async function restoreCampaign(file: File) {
@@ -324,7 +326,14 @@ export function App() {
 
   async function handleImport(file: File) {
     setBusy('Đang đọc bảng ưu đãi…');
-    try { await newOffers(await importOffers(file)); }
+    try {
+      const offers = await importOffers(file);
+      const warnings = offerWarnings(offers);
+      if (warnings.length) {
+        setOfferImport({ offers, warnings });
+        setDialog('verify-offers');
+      } else await newOffers(offers);
+    }
     catch (error) { notify(errorText(error), true); }
     finally { setBusy(''); }
   }
@@ -386,7 +395,8 @@ export function App() {
       await persist(recordAudit({ ...current, audit: { ...current.audit, refreshed: [...processed] } }, 'batch'));
     }
     const label = signal.aborted ? 'Đã dừng lượt quét.' : 'Đã xong lượt quét.';
-    notify(`${label} ${success} video có kết quả · ${warnings} cần xem lại.`);
+    const reminder = !current.demo && success + warnings >= 10 ? ' Có thể tải bản sao lưu trong Quản lý chiến dịch.' : '';
+    notify(`${label} ${success} video có kết quả · ${warnings} cần xem lại.${reminder}`);
   }
 
   async function saveClips(drafts: DraftClip[], options: ScanOptions, choice: DuplicateChoice) {
@@ -607,10 +617,14 @@ export function App() {
           <button className={`button ${page === 'report' ? 'secondary' : 'primary'}`} onClick={startAdd} disabled={!!busy}><Plus size={18} /> Thêm video</button>
         </div>}
       </header>
-      <div className="main-content">
+      <div className={`main-content${(page === 'report' || page === 'clips') && showDetail && currentClip ? ' viewing-mobile-clip' : ''}`}>
         <div className="page-title">
           <div><h1 id="page-heading" ref={pageHeading} tabIndex={-1}>{title[page]}</h1><p>{descriptions[page]}</p></div>
           {page === 'report' && <span className="activity-pill"><span /> {data.audit ? `Đã rà ${results.length} video` : 'Chưa có lần rà'}</span>}
+          {(page === 'report' || page === 'clips') && currentClip && !showDetail &&
+            <button className="button secondary mobile-clip-link" type="button" onClick={() => selectClip(currentClip.id)}>
+              Xem bằng chứng <ArrowRight size={16} aria-hidden="true" />
+            </button>}
         </div>
         {page === 'report' && (data.demo
           ? <DemoStart onExample={example ? () => openFinding(example.clip, example.finding) : undefined}
@@ -719,6 +733,8 @@ export function App() {
     {dialog === 'evidence' && <EvidenceDialog row={evidenceIndex === null ? undefined : editing?.evidence[evidenceIndex]}
       onSave={saveEvidence} onClose={clearDialog} />}
     {dialog === 'offers' && <OfferDialog offers={version?.offers ?? []} onClose={clearDialog} onSave={newOffers} />}
+    {dialog === 'verify-offers' && offerImport && <ConfirmOfferImport items={offerImport.warnings} onClose={clearDialog}
+      onSave={() => newOffers(offerImport.offers)} />}
     {dialog === 'brief' && version?.offers.length ? <OfferBriefDialog offers={version.offers} version={data.versions.length}
       onClose={clearDialog} /> : null}
     {dialog === 'impact' && impact && <OfferImpactDialog impact={impact} onClose={clearDialog}

@@ -4,7 +4,7 @@ import { clipFormats, normalizeCode, safeLink } from './domain';
 import type { Clip, ClipFormat, Evidence, Offer, VideoStats } from './domain';
 import { readCount } from './catalog';
 import { readPrice, readSubtitles } from './files';
-import { validateOffers } from './audit';
+import { offerWarnings, validateOffers } from './audit';
 import { prepareSpeech, speechIsReady, type ScanOptions, validateVideo } from './media';
 import { DuplicateVideo, type DuplicateChoice } from './duplicates';
 import { Modal } from './ui';
@@ -140,7 +140,7 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel, onOpen
       {files.length > 0 && <div className="selected-files">
         {files.map((file, i) => <div key={i}>
           <span>{file.name}</span>
-          {many && <input aria-label={`SKU cho ${file.name}`} placeholder="SKU riêng" list="clip-skus"
+          {many && <input aria-label={`SKU cho ${file.name}`} placeholder="Dùng SKU mặc định" list="clip-skus"
             value={fileSkus[i]} onChange={event => setFileSkus(values => values.map((value, j) => j === i ? event.target.value : value))}
             disabled={!!busy} />}
         </div>)}
@@ -149,9 +149,10 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel, onOpen
       <div className="form-grid">
         {!many && <label>Tên video<input value={title} maxLength={140} onChange={event => setTitle(event.target.value)} placeholder="Ví dụ: Bình giữ nhiệt 500 ml" disabled={!!busy} /></label>}
         <label>{many ? 'SKU mặc định' : 'Mã phân loại (SKU)'}<input value={sku} maxLength={100} onChange={event => setSku(event.target.value)} list="clip-skus"
-          aria-describedby="clip-sku-hint" placeholder="BINH-500" disabled={!!busy} /></label>
+          aria-describedby="clip-sku-hint" placeholder="Chưa gán SKU" disabled={!!busy} /></label>
         <datalist id="clip-skus">{skus.map(value => <option key={value} value={value} />)}</datalist>
-        {!many && <label>Link bài đăng<input type="url" value={link} onChange={event => setLink(event.target.value)} placeholder="https://…" disabled={!!busy} /></label>}
+        {!many && <label>Link bài đăng<input type="url" value={link} onChange={event => setLink(event.target.value)} placeholder="https://…"
+          aria-describedby="clip-link-hint" disabled={!!busy} /><small className="hint-text" id="clip-link-hint">Dùng link để mở bài đăng. Để quét, gắn file video hoặc nhập phụ đề.</small></label>}
         <label>Ngày đăng<input type="date" value={published} onChange={event => setPublished(event.target.value)} disabled={!!busy} /></label>
         <label>Kiểu video<select value={format} disabled={!!busy} onChange={event => setFormat(event.target.value as typeof format)}>
           <option value="">Chưa chọn kiểu</option>
@@ -225,11 +226,48 @@ export function ClipDialog({ clip, skus, onSave, onClose, busy, onCancel, onOpen
 type OfferRow = Omit<Offer, 'price'> & { price: string };
 const blankOffer: OfferRow = { sku: '', name: '', code: '', price: '', gift: '', start: '', end: '', condition: '' };
 
+function OfferWarnings({ items }: { items: string[] }) {
+  return <section className="offer-warnings" aria-label="Lưu ý trước khi lưu">
+    <strong role="status">{items.length} lưu ý cần kiểm tra</strong>
+    <ul>{items.slice(0, 12).map((item, index) => <li key={index}>{item}</li>)}</ul>
+    {items.length > 12 && <p>Còn {items.length - 12} lưu ý. Kiểm tra thêm các giá 0 đ và mã dùng trên nhiều SKU.</p>}
+  </section>;
+}
+
+export function ConfirmOfferImport({ items, onSave, onClose }: {
+  items: string[]; onSave: () => Promise<void>; onClose: () => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  async function save() {
+    setSaving(true);
+    setError('');
+    try { await onSave(); }
+    catch (failure) { setError(failure instanceof Error ? failure.message : 'Chưa lưu được bảng.'); }
+    finally { setSaving(false); }
+  }
+  return <Modal title="Kiểm tra bảng vừa nhập" detail="Xác nhận các giá trị dưới đây trước khi lưu thành phiên bản mới." onClose={onClose} busy={saving}>
+    <div className="dialog-form">
+      <OfferWarnings items={items} />
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <div className="dialog-actions">
+        <button className="button secondary" type="button" onClick={onClose} disabled={saving}>Hủy nhập</button>
+        <button className="button primary" type="button" onClick={() => void save()} disabled={saving}>Vẫn lưu phiên bản</button>
+      </div>
+    </div>
+  </Modal>;
+}
+
 export function OfferDialog({ offers, onSave, onClose }: { offers: Offer[]; onSave: (value: Offer[]) => Promise<void>; onClose: () => void }) {
   const [rows, setRows] = useState<OfferRow[]>(offers.length
     ? offers.map(row => ({ ...row, price: row.price?.toString() ?? '' })) : [{ ...blankOffer }]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  function updateRows(update: (values: OfferRow[]) => OfferRow[]) {
+    setWarnings([]);
+    setRows(update);
+  }
   const fields: { key: keyof OfferRow; label: string; holder: string }[] = [
     { key: 'sku', label: 'SKU', holder: 'BINH-500' }, { key: 'name', label: 'Tên sản phẩm', holder: 'Bình giữ nhiệt 500 ml' },
     { key: 'code', label: 'Voucher', holder: 'SALE99' }, { key: 'price', label: 'Giá (đ)', holder: '99000' },
@@ -247,7 +285,13 @@ export function OfferDialog({ offers, onSave, onClose }: { offers: Offer[]; onSa
           throw Error(`Dòng ${index + 1}: ${failure instanceof Error ? failure.message : 'Giá không hợp lệ.'}`);
         }
       });
-      await onSave(validateOffers(offers));
+      const checked = validateOffers(offers);
+      const cautions = offerWarnings(checked);
+      if (cautions.length && !warnings.length) {
+        setWarnings(cautions);
+        return;
+      }
+      await onSave(checked);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Chưa lưu được bảng.');
     } finally { setSaving(false); }
@@ -258,18 +302,22 @@ export function OfferDialog({ offers, onSave, onClose }: { offers: Offer[]; onSa
         {rows.map((row, index) => <fieldset className="offer-edit" key={index}>
           <legend>Dòng {index + 1}</legend>
           {rows.length > 1 && <button type="button" className="icon-button remove-row" title="Xóa dòng" aria-label={`Xóa dòng ${index + 1}`}
-            onClick={() => setRows(values => values.filter((_, at) => at !== index))} disabled={saving}><Trash2 size={16} /></button>}
+            onClick={() => updateRows(values => values.filter((_, at) => at !== index))} disabled={saving}><Trash2 size={16} /></button>}
           <div className="form-grid">{fields.map(field => <label key={field.key}>{field.label}
             <input value={row[field.key]} placeholder={field.holder} disabled={saving}
-              onChange={event => setRows(values => values.map((value, at) => at === index ? { ...value, [field.key]: event.target.value } : value))} />
+              onChange={event => {
+                const input = event.target.value;
+                updateRows(values => values.map((value, at) => at === index ? { ...value, [field.key]: input } : value));
+              }} />
           </label>)}</div>
         </fieldset>)}
       </div>
-      <button type="button" className="button secondary add-offer" onClick={() => setRows(values => [...values, { ...blankOffer }])} disabled={saving}><CirclePlus size={16} /> Thêm dòng</button>
+      <button type="button" className="button secondary add-offer" onClick={() => updateRows(values => [...values, { ...blankOffer }])} disabled={saving}><CirclePlus size={16} /> Thêm dòng</button>
+      {warnings.length > 0 && <OfferWarnings items={warnings} />}
       {error && <p className="form-error" role="alert"><CircleAlert size={16} /> {error}</p>}
       <div className="dialog-actions">
         <button type="button" className="button secondary" onClick={onClose} disabled={saving}>Hủy</button>
-        <button className="button primary" type="submit" disabled={saving}>Lưu phiên bản</button>
+        <button className="button primary" type="submit" disabled={saving}>{warnings.length ? 'Vẫn lưu phiên bản' : 'Lưu phiên bản'}</button>
       </div>
     </form>
   </Modal>;

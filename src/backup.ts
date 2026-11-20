@@ -5,6 +5,7 @@ import type {
   Finding, Kind, Offer, OfferVersion, Review, Verdict, Workspace,
 } from './domain';
 import type { MediaChange } from './storage';
+import { screenSavedEvidence } from './evidence-quality';
 import { parseVietnamTime } from './time';
 
 const MAGIC = 'RACLIP1\n';
@@ -69,7 +70,8 @@ function readScan(value: unknown) {
   const sources = Object.fromEntries((['audio', 'frame'] as const).flatMap(source => {
     if (!rawSources[source]) return [];
     const item = object(rawSources[source]);
-    return [[source, { state: oneOf(item.state, ['done', 'empty', 'failed'] as const), detail: string(item.detail, 1600) }]];
+    return [[source, { state: oneOf(item.state, ['done', 'empty', 'failed'] as const), detail: string(item.detail, 1600),
+      discarded: item.discarded === undefined ? undefined : numeric(item.discarded, 100_000) }]];
   }));
   return { at: date(row.at), detail: string(row.detail, 1600), audio: row.audio === true, frame: row.frame === true,
     sources: row.sources ? sources : undefined,
@@ -175,7 +177,7 @@ export async function readBackup(blob: Blob): Promise<{ draft: CampaignDraft; wo
       evidence: array(row.evidence, 1500).map(readEvidence),
       masks: array(row.masks ?? [], 2000).map(readMask),
     };
-  });
+  }).map(screenSavedEvidence);
   if (new Set(clips.map(clip => clip.id)).size !== clips.length) throw malformed();
   const versions: OfferVersion[] = array(rawState.versions, 300).map(value => {
     const row = object(value);
@@ -187,6 +189,7 @@ export async function readBackup(blob: Blob): Promise<{ draft: CampaignDraft; wo
     const row = object(value);
     return {
       versionId: string(row.versionId, 140), checkedAt: date(row.checkedAt),
+      rulesVersion: row.rulesVersion === undefined ? undefined : numeric(row.rulesVersion, 1000),
       refreshed: array(row.refreshed, 4000).map(newId),
       results: array(row.results, 4000).map(value => {
         const item = object(value);

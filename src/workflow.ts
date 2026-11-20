@@ -1,8 +1,9 @@
-import { runAudit } from './audit';
+import { auditRulesVersion, runAudit } from './audit';
 import { localTime } from './domain';
 import type {
   AuditSnapshot, AuditTrigger, Clip, Evidence, EvidenceMask, Finding, Review, Verdict, Workspace,
 } from './domain';
+import { screenSavedEvidence } from './evidence-quality';
 
 export const verdicts: Verdict[] = ['action', 'review', 'dated', 'clear'];
 
@@ -44,10 +45,16 @@ function snapshot(workspace: Workspace, trigger: AuditTrigger, recordedAt: strin
 }
 
 export function prepareWorkspace(workspace: Workspace): Workspace {
-  if (workspace.snapshots) return workspace;
-  const baseline = workspace.audit && workspace.audit.results.length
-    ? [snapshot(workspace, 'baseline', workspace.audit.checkedAt)] : [];
-  return { ...workspace, snapshots: baseline, notes: workspace.notes ?? {} };
+  const upgraded = workspace.audit?.rulesVersion === auditRulesVersion ? workspace : {
+    ...workspace, clips: workspace.clips.map(screenSavedEvidence),
+  };
+  if (upgraded !== workspace && upgraded.versions.length) {
+    upgraded.audit = runAudit(upgraded.clips, upgraded.versions, upgraded.checkedAt);
+  }
+  if (upgraded.snapshots) return upgraded;
+  const baseline = upgraded.audit && upgraded.audit.results.length
+    ? [snapshot(upgraded, 'baseline', upgraded.audit.checkedAt)] : [];
+  return { ...upgraded, snapshots: baseline, notes: upgraded.notes ?? {} };
 }
 
 export function recordAudit(workspace: Workspace, trigger: AuditTrigger): Workspace {

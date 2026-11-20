@@ -3,6 +3,8 @@ import { displayDate, kindLabels, money, normalizeCode, offerKey } from './domai
 import type { Audit, Claim, Clip, Evidence, Finding, Offer, OfferVersion, Verdict } from './domain';
 import { parseVietnamTime } from './time';
 
+export const auditRulesVersion = 2;
+
 export function validateOffers(input: Offer[], sourceLines?: number[]): Offer[] {
   if (!input.length) throw Error('Bảng ưu đãi cần ít nhất một dòng.');
   const keys = new Set<string>();
@@ -26,6 +28,24 @@ export function validateOffers(input: Offer[], sourceLines?: number[]): Offer[] 
     keys.add(key);
     return offer;
   });
+}
+
+export function offerWarnings(offers: Offer[]) {
+  const codes = new Map<string, Set<string>>();
+  const warnings = offers.filter(offer => offer.price === 0).map(offer =>
+    `Giá 0 đ ở SKU ${offer.sku}${offer.code ? ` (mã ${offer.code})` : ''}. Xác nhận đây là mức giá dự kiến.`);
+  for (const offer of offers) {
+    if (!offer.code) continue;
+    const skus = codes.get(offer.code) ?? new Set<string>();
+    skus.add(offer.sku);
+    codes.set(offer.code, skus);
+  }
+  for (const [code, skus] of codes) {
+    if (skus.size < 2) continue;
+    const names = [...skus].slice(0, 5).join(', ');
+    warnings.push(`Mã ${code} dùng cho ${skus.size} SKU (${names}${skus.size > 5 ? ', …' : ''}). Xác nhận phạm vi áp dụng.`);
+  }
+  return warnings;
 }
 
 export const offerFields = ['name', 'price', 'gift', 'start', 'end', 'condition'] as const;
@@ -146,7 +166,8 @@ export function coverageHelp(clip: Clip, hasSku: boolean) {
   if (!hasSku) return { reason: 'Mã sản phẩm của video chưa có trong bảng ưu đãi.', action: 'sku' } as const;
   const hasAudioText = clip.evidence.some(row => row.source !== 'frame');
   const lastAudio = clip.lastScan?.sources?.audio;
-  if (lastAudio?.state === 'failed' || (!lastAudio && clip.lastScan?.audio && !hasAudioText && clip.lastScan.state !== 'ready')) {
+  if (lastAudio?.state === 'failed' || lastAudio?.state === 'empty' ||
+    (!lastAudio && clip.lastScan?.audio && !hasAudioText && clip.lastScan.state !== 'ready')) {
     return { reason: 'Chưa quét xong lời thoại. Thông tin được nói trong clip có thể chưa được đối chiếu.', action: 'audio' } as const;
   }
   if (clip.evidence.length) {
@@ -154,7 +175,12 @@ export function coverageHelp(clip: Clip, hasSku: boolean) {
     return { reason: onlyFrames ? 'Chưa thấy giá, voucher hoặc quà tặng trong các khung hình đã đọc.'
       : 'Chưa trích được giá, voucher hoặc quà tặng từ các nguồn đã có.', action: 'segments' } as const;
   }
-  if (clip.localMedia || clip.demoMedia) return { reason: 'Chưa có đoạn trích để đối chiếu. Kiểm tra các nguồn quét trong video.', action: 'scan' } as const;
+  if (clip.localMedia || clip.demoMedia) {
+    if (!lastAudio && clip.lastScan?.frame) {
+      return { reason: 'Chưa chạy lời thoại. Chữ đọc được chưa đủ để đối chiếu ưu đãi.', action: 'audio' } as const;
+    }
+    return { reason: 'Chưa có đoạn trích để đối chiếu. Quét video hoặc thêm phụ đề.', action: 'scan' } as const;
+  }
   return { reason: 'Video thiếu file hoặc phụ đề có mốc thời gian.', action: 'edit' } as const;
 }
 
@@ -183,7 +209,7 @@ export function runAudit(clips: Clip[], versions: OfferVersion[], checkedAt: str
   const current = versions.at(-1);
   const now = parseVietnamTime(checkedAt);
   if (!current || now === null) throw Error('Cần bảng ưu đãi và thời điểm rà hợp lệ.');
-  const oldVersion = previous && previous.checkedAt === checkedAt
+  const oldVersion = previous?.rulesVersion === auditRulesVersion && previous.checkedAt === checkedAt
     ? versions.find(row => row.id === previous.versionId) : undefined;
   const skus = oldVersion ? changedSkus(oldVersion.offers, current.offers) : null;
   const previousResults = new Map((previous?.results ?? []).map(row => [row.clipId, row]));
@@ -191,13 +217,13 @@ export function runAudit(clips: Clip[], versions: OfferVersion[], checkedAt: str
   const refreshed: string[] = [];
   const results = clips.map(clip => {
     const signature = JSON.stringify([clip.sku, clip.published, clip.evidence, Boolean(clip.localMedia || clip.demoMedia),
-      clip.lastScan?.audio, clip.lastScan?.state, clip.lastScan?.sources?.audio?.state, 'coverage-v2']);
+      clip.lastScan?.audio, clip.lastScan?.frame, clip.lastScan?.state, clip.lastScan?.sources?.audio?.state]);
     const old = previousResults.get(clip.id);
     if (skus && old?.signature === signature && !skus.has(clip.sku)) return old;
     refreshed.push(clip.id);
     return { clipId: clip.id, signature, findings: scanClip(clip, current.offers, history, now) };
   });
-  return { versionId: current.id, checkedAt, results, refreshed };
+  return { versionId: current.id, checkedAt, results, refreshed, rulesVersion: auditRulesVersion };
 }
 
 export function auditDraft(clip: Clip, offer: Offer, checkedAt: string) {

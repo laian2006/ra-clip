@@ -1,4 +1,5 @@
 import type { Evidence, MediaSource, ScanSource } from './domain';
+import { keepSpeechEvidence, screenOcrLines, screenedSource } from './evidence-quality';
 
 const MAX_BYTES = 150 * 1024 * 1024;
 const MAX_DURATION = 120;
@@ -241,6 +242,13 @@ async function readFrames(video: HTMLVideoElement, progress: (message: string) =
     if (!context) throw Error('Trình duyệt không đọc được khung hình.');
 
     const evidence: Evidence[] = [];
+    let discarded = 0;
+    const read = async (image: HTMLCanvasElement) => {
+      const { data } = await worker.recognize(image, {}, { text: true, blocks: true });
+      const lines = data.blocks?.flatMap(block => block.paragraphs.flatMap(paragraph => paragraph.lines));
+      return { ...screenOcrLines(lines?.length ? lines : data.text.split('\n').map(text => ({ text, confidence: data.confidence }))),
+        confidence: data.confidence };
+    };
     const frames = Math.max(1, Math.min(MAX_FRAMES, Math.ceil(video.duration / 2)));
     for (let i = 0; i < frames; i++) {
       signal.throwIfAborted();
@@ -252,19 +260,20 @@ async function readFrames(video: HTMLVideoElement, progress: (message: string) =
       }
       progress(`Đọc chữ trên video · khung ${i + 1}/${frames}`);
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const { data } = await worker.recognize(canvas);
-      let text = data.text.trim();
-      if (!hasOfferText(text)) {
-        const { data: highContrast } = await worker.recognize(contrastCaptions(canvas));
-        const alternative = highContrast.text.trim();
-        if (alternative && (hasOfferText(alternative) || highContrast.confidence > data.confidence)) text = alternative;
+      let reading = await read(canvas);
+      if (!hasOfferText(reading.text)) {
+        const alternate = await read(contrastCaptions(canvas));
+        const useAlternate = alternate.text && (!reading.text || hasOfferText(alternate.text) || alternate.confidence > reading.confidence);
+        if (useAlternate) reading = alternate;
+        else if (!reading.text) reading.discarded = Math.max(reading.discarded, alternate.discarded);
       }
-      if (text) evidence.push({
+      discarded += reading.discarded;
+      if (reading.text) evidence.push({
         start: Math.round(at * 10) / 10, end: null,
-        text: text.replace(/\n\s*\n/g, '\n'), source: 'frame',
+        text: reading.text, source: 'frame',
       });
     }
-    return evidence;
+    return { evidence, discarded };
   };
 
   try {
@@ -294,9 +303,9 @@ export async function analyzeVideo(blob: Blob, options: ScanOptions, progress: (
         if (!samples.some(value => Math.abs(value) > 0.005)) sources.audio = { state: 'empty', detail: 'Âm thanh quá nhỏ để nhận dạng.' };
         else {
           const speech = await speechTask(samples, progress, signal);
-          evidence.push(...speech);
-          sources.audio = speech.length ? { state: 'done', detail: `Đã nhận dạng ${speech.length} đoạn.` }
-            : { state: 'empty', detail: 'Chưa nhận ra lời thoại.' };
+          const kept = keepSpeechEvidence(speech);
+          evidence.push(...kept);
+          sources.audio = screenedSource('audio', kept.length, speech.length - kept.length);
         }
       } catch (error) {
         signal.throwIfAborted();
@@ -307,9 +316,8 @@ export async function analyzeVideo(blob: Blob, options: ScanOptions, progress: (
       try {
         progress('Đang chuẩn bị mô hình đọc chữ…');
         const frames = await readFrames(video, progress, signal);
-        evidence.push(...frames);
-        sources.frame = frames.length ? { state: 'done', detail: `Đã đọc chữ tại ${frames.length} mốc.` }
-          : { state: 'empty', detail: 'Chưa đọc được chữ trên các khung hình đã quét.' };
+        evidence.push(...frames.evidence);
+        sources.frame = screenedSource('frame', frames.evidence.length, frames.discarded);
       } catch (error) {
         signal.throwIfAborted();
         console.debug('Tesseract:', error);

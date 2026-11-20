@@ -1,5 +1,6 @@
 import { ArrowDownToLine, CalendarClock, CircleCheckBig, History, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
+import { auditRulesVersion } from './audit';
 import { displayDate, verdictLabels } from './domain';
 import type { AuditSnapshot, Verdict } from './domain';
 import { auditCsv, download } from './files';
@@ -42,6 +43,10 @@ export function HistoryView({ snapshots, onReport }: { snapshots: AuditSnapshot[
         )}><ArrowDownToLine size={16} /> Tải bản báo cáo</button>
       </div>
       <div className="run-body">
+        {selected.audit.rulesVersion !== auditRulesVersion && <div className="history-rules">
+          <p>Bản ghi này dùng quy tắc rà cũ. Xem báo cáo hiện tại khi cần xử lý cảnh báo.</p>
+          <button type="button" className="text-button" onClick={onReport}>Xem báo cáo hiện tại</button>
+        </div>}
         <dl className="run-metrics">{verdicts.map(verdict =>
           <div key={verdict} className={verdict}><dt>{verdictLabels[verdict]}</dt><dd>{outcomes.get(verdict)}</dd></div>)}</dl>
         <p className="history-caption">{selected.audit.refreshed.length} video được tính lại trong lần rà này.</p>

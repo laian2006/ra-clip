@@ -10,6 +10,10 @@ import { Modal } from './ui';
 const labels = { ...scanLabels, running: 'Đang quét', stopped: 'Đã dừng' };
 const limit = 20;
 
+function elapsedLabel(seconds: number) {
+  return seconds < 60 ? `${seconds} giây` : `${Math.floor(seconds / 60)} phút ${seconds % 60} giây`;
+}
+
 export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
   clips: Clip[]; initialClipId?: string;
   onRun: (ids: string[], options: ScanOptions, signal: AbortSignal, onEvent: (event: BatchEvent) => void) => Promise<void>;
@@ -26,14 +30,26 @@ export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
   const [total, setTotal] = useState(0);
   const [error, setError] = useState('');
   const [announced, setAnnounced] = useState('');
-  const [estimate, setEstimate] = useState<number>();
+  const [average, setAverage] = useState<number>();
+  const [elapsed, setElapsed] = useState(0);
+  const [clipElapsed, setClipElapsed] = useState(0);
   const controller = useRef<AbortController | null>(null);
+  const started = useRef(0);
+  const clipStarted = useRef(0);
   const stopButton = useRef<HTMLButtonElement>(null);
   const startButton = useRef<HTMLButtonElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const options = { audio: mode !== 'frame', frame: mode !== 'audio' };
   const filtered = videos.filter(clip => fold(`${clip.title} ${clip.sku}`).includes(fold(query.trim())));
   useEffect(() => () => controller.current?.abort(), []);
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => {
+      setElapsed(Math.floor((performance.now() - started.current) / 1000));
+      setClipElapsed(Math.floor((performance.now() - clipStarted.current) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [running]);
 
   function select(id: string, enabled: boolean) {
     setSelected(values => {
@@ -54,7 +70,11 @@ export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
     let measured = 0;
     let measuredTime = 0;
     let currentId = '';
-    setEstimate(undefined);
+    started.current = start;
+    clipStarted.current = start;
+    setAverage(undefined);
+    setElapsed(0);
+    setClipElapsed(0);
     setRunning(true); setError(''); setEvents({}); setTotal(ids.length); setAnnounced(`Bắt đầu quét ${ids.length} video.`);
     requestAnimationFrame(() => stopButton.current?.focus());
     try {
@@ -63,15 +83,17 @@ export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
         if (event.state === 'running' && currentId !== event.id) {
           currentId = event.id;
           start = performance.now();
+          clipStarted.current = start;
+          setClipElapsed(0);
         }
         if (event.state !== 'running') {
           if (event.state !== 'stopped') {
             finished.add(event.id);
-            if (event.state === 'ready' || event.state === 'partial') {
+            if (event.state !== 'failed') {
               measured++;
               measuredTime += performance.now() - start;
             }
-            if (measured) setEstimate(Math.max(1, Math.ceil(measuredTime / measured * (ids.length - finished.size) / 1000)));
+            if (measured) setAverage(Math.max(1, Math.ceil(measuredTime / measured / 1000)));
           }
           setAnnounced(`${videos.find(clip => clip.id === event.id)?.title ?? 'Video'} · ${labels[event.state]}`);
         }
@@ -91,6 +113,10 @@ export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
   }
 
   const done = Object.values(events).filter(event => event.state !== 'running' && event.state !== 'stopped').length;
+  const runningVideo = Object.values(events).find(event => event.state === 'running');
+  const remaining = average === undefined ? undefined
+    : average * Math.max(0, total - done - Number(Boolean(runningVideo))) +
+      (runningVideo ? Math.max(0, average - clipElapsed) : 0);
   return <Modal title="Quét video hàng loạt" detail="Chọn tối đa 20 file. App lưu kết quả từng video khi hoàn tất." busy={running} onClose={onClose}>
     <div className="dialog-form">
       <p className="hint-text">Dùng với video đã có file trong kho và các clip mẫu. Khi dừng, các video còn lại sẽ được giữ trong lựa chọn.</p>
@@ -109,6 +135,16 @@ export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
           setSelected(new Set(filtered.slice(0, limit).map(clip => clip.id)))}>Chọn video đang lọc</button>
         <button className="text-button" type="button" disabled={running || !selected.size} onClick={() => setSelected(new Set())}>Bỏ chọn</button>
       </div>
+      {(running || done > 0) && <div className="batch-progress">
+        <label htmlFor="batch-progress">Đã hoàn tất {done}/{total} video trong lượt này</label>
+        <progress id="batch-progress" max={Math.max(1, total)} value={done} />
+        {running && <>
+          <p>Đã chạy {elapsedLabel(elapsed)}{average !== undefined && ` · Trung bình ${elapsedLabel(average)}/video`}</p>
+          {runningVideo && <p className="batch-current"><strong>{videos.find(clip => clip.id === runningVideo.id)?.title}</strong> · {runningVideo.detail}</p>}
+          {done < total && <p>{remaining === undefined ? 'Đang đo tốc độ từ video đầu tiên. Lần đầu có thể mất thêm thời gian tải mô hình.'
+            : remaining > 0 ? `Còn khoảng ${elapsedLabel(remaining)} theo tốc độ đã đo.` : 'Video hiện tại cần thêm thời gian so với mức trung bình.'}</p>}
+        </>}
+      </div>}
       <ul className="batch-list">{filtered.map(clip => {
         const event = events[clip.id];
         return <li key={clip.id}>
@@ -119,12 +155,6 @@ export function BatchDialog({ clips, initialClipId, onRun, onClose }: {
         </li>;
       })}</ul>
       {!filtered.length && <p className="empty-inline">Chưa có file video khớp bộ lọc.</p>}
-      {(running || done > 0) && <div className="batch-progress">
-        <label htmlFor="batch-progress">Đã hoàn tất {done}/{total} video trong lượt này</label>
-        <progress id="batch-progress" max={Math.max(1, total)} value={done} />
-        {running && done < total && <p>{estimate === undefined ? 'Sẽ ước lượng sau khi quét xong video đầu tiên có kết quả.'
-          : `Còn khoảng ${estimate >= 60 ? `${Math.ceil(estimate / 60)} phút` : `${estimate} giây`} theo tốc độ các video vừa quét.`}</p>}
-      </div>}
       <span className="sr-only" role="status" aria-atomic="true">{announced}</span>
       {error && <p className="form-error" role="alert"><CircleAlert size={16} /> {error}</p>}
       <div className="dialog-actions">
