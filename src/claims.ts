@@ -11,8 +11,7 @@ export function hasOfferCue(text: string) {
   const labeled = /\b(?:ma|voucher|code)\s*[:=]?\s*[a-z0-9][a-z0-9_-]{1,39}\b/.test(value);
   const gift = /\btang\s+(?:[0-9]+|[a-z]{2,})\b/.test(value);
   const code = text.split('\n').some(line => /^[A-Z]{3,}[0-9][A-Z0-9_-]*$/.test(line.trim()));
-  const date = /\b(?:chi\s+(?:co\s+)?hom\s+nay|(?:chi|ngay|het|den)\s+(?:ngay\s+)?\d{1,2}[/-]\d{1,2})\b/.test(value);
-  return price || labeled || gift || code || date;
+  return price || labeled || gift || code || prices(value).length > 0 || !!readDisclosure(value, '');
 }
 
 export function referenceOnly(row: Evidence) {

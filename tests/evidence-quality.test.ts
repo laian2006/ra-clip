@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { runAudit } from '../src/audit';
 import { completeScan } from '../src/batch';
+import { referenceOnly } from '../src/claims';
 import type { Clip, Evidence, OfferVersion, Workspace } from '../src/domain';
 import { emptyWorkspace } from '../src/demo';
 import { hasSpeechLoop, keepSpeechEvidence, screenOcrLines, screenedSource } from '../src/evidence-quality';
@@ -82,6 +83,17 @@ describe('machine evidence filters', () => {
       { text: 'Mã Z2', confidence: 92 }, { text: '129K', confidence: 68 },
       { text: 'Sulwhasoo First Care Activating', confidence: 91 },
     ])).toEqual({ text: 'Mã Z2\n129K\nSulwhasoo First Care Activating', discarded: 6 });
+  });
+
+  it('uses supported OCR price and date formats without trusting product fragments', () => {
+    const screened = screenOcrLines([{ text: 'Giá chỉ 2 tr', confidence: 65 }]);
+    const frame: Evidence = { source: 'frame', start: 5, end: null, text: screened.text };
+    const twoMillion = { ...version, offers: [{ ...version.offers[0], price: 2_000_000, gift: '' }] };
+    const { findings } = runAudit([{ ...clip, evidence: [frame] }], [twoMillion], at).results[0];
+    expect(findings).toMatchObject([{ kind: 'price', verdict: 'clear' }]);
+    expect(referenceOnly({ ...frame, text: 'Còn một triệu' })).toBe(false);
+    expect(referenceOnly({ ...frame, text: 'Áp dụng từ 20/11' })).toBe(false);
+    expect(referenceOnly({ ...frame, text: 'Dâu Tây tran' })).toBe(true);
   });
 
   it('clears old unusable audio on a completed empty scan while preserving corrections', () => {

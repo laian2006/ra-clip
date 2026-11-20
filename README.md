@@ -8,7 +8,7 @@ Kiểm bản nháp trước khi đăng và rà lại video bán hàng khi giá, 
 
 [Ghi chú phát hành 1.5.2 và kết quả kiểm tra hai clip gốc](docs/ban-phat-hanh-1.5.2.md).
 
-[Ghi chú phát hành 1.5.3 và kiểm chứng FIX-12](docs/ban-phat-hanh-1.5.3.md).
+[Ghi chú phát hành 1.5.3–1.5.4 và kết quả kiểm chứng FIX-12](docs/ban-phat-hanh-1.5.3.md).
 
 ## Chạy trên web
 

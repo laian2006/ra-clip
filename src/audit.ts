@@ -4,7 +4,7 @@ import type { Audit, Claim, Clip, Evidence, Finding, Offer, OfferVersion, Verdic
 import { filteredSpeech } from './evidence-quality';
 import { parseVietnamTime } from './time';
 
-export const auditRulesVersion = 4;
+export const auditRulesVersion = 5;
 
 export function validateOffers(input: Offer[], sourceLines?: number[]): Offer[] {
   if (!input.length) throw Error('Bảng ưu đãi cần ít nhất một dòng.');
