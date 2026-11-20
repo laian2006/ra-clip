@@ -8,6 +8,8 @@ Kiểm bản nháp trước khi đăng và rà lại video bán hàng khi giá, 
 
 [Ghi chú phát hành 1.5.2 và kết quả kiểm tra hai clip gốc](docs/ban-phat-hanh-1.5.2.md).
 
+[Ghi chú phát hành 1.5.3 và kiểm chứng FIX-12](docs/ban-phat-hanh-1.5.3.md).
+
 ## Chạy trên web
 
 Mở [Rà Clip trên GitHub Pages](https://laian2006.github.io/ra-clip/) để thử với dữ liệu mẫu hoặc dữ liệu của bạn. Sau khi cập nhật `main`, GitHub Actions kiểm thử và đưa bản build đạt kiểm thử lên web.

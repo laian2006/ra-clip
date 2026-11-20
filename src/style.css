@@ -619,6 +619,7 @@
   .batch-current { overflow-wrap: anywhere; }
   .scan-guidance { margin-bottom: 8px; }
   .scan-guidance .text-button { margin-top: 3px; white-space: normal; text-align: left; }
+  .low-confidence { display: inline-block; margin-inline-start: 6px; padding: 2px 5px; border-radius: 4px; background: var(--review-bg); color: #684a1c; }
   .mobile-clip-link.button { display: none; }
   .tool-demo-note { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px;
     margin-bottom: 12px; padding: 8px 10px; background: #efeee6; border-radius: 8px; color: var(--muted); font-size: 12px; }

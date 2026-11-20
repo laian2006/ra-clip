@@ -1,10 +1,10 @@
-import { compareGift, extractClaims, fold, unclearSpokenVoucher } from './claims';
+import { compareGift, extractClaims, fold, referenceOnly, unclearSpokenVoucher } from './claims';
 import { displayDate, kindLabels, money, normalizeCode, offerKey } from './domain';
 import type { Audit, Claim, Clip, Evidence, Finding, Offer, OfferVersion, Verdict } from './domain';
 import { filteredSpeech } from './evidence-quality';
 import { parseVietnamTime } from './time';
 
-export const auditRulesVersion = 3;
+export const auditRulesVersion = 4;
 
 export function validateOffers(input: Offer[], sourceLines?: number[]): Offer[] {
   if (!input.length) throw Error('Bảng ưu đãi cần ít nhất một dòng.');
@@ -170,8 +170,11 @@ export function coverageHelp(clip: Clip, hasSku: boolean) {
   if (!clip.sku) return { reason: 'Video chưa được gán mã sản phẩm.', action: 'sku' } as const;
   if (!hasSku) return { reason: 'Mã sản phẩm của video chưa có trong bảng ưu đãi.', action: 'sku' } as const;
   const filtered = filteredSpeech(clip);
-  if (filtered) return { reason: filtered, action: 'subtitles' } as const;
-  const hasAudioText = clip.evidence.some(row => row.source !== 'frame');
+  if (filtered) return {
+    reason: filtered,
+    action: clip.evidence.some(row => row.source === 'audio' && referenceOnly(row)) ? 'audio-draft' : 'subtitles',
+  } as const;
+  const hasAudioText = clip.evidence.some(row => row.source !== 'frame' && !referenceOnly(row));
   const lastAudio = clip.lastScan?.sources?.audio;
   if ((lastAudio?.state === 'failed' || lastAudio?.state === 'empty') && !hasAudioText ||
     (!lastAudio && clip.lastScan?.audio && !hasAudioText && clip.lastScan.state !== 'ready')) {

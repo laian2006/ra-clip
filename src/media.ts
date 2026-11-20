@@ -1,5 +1,7 @@
 import type { Evidence, MediaSource, ScanSource } from './domain';
 import { keepSpeechEvidence, screenOcrLines, screenedSource } from './evidence-quality';
+import { referenceOnly } from './claims';
+import { speechSampleRate, type SpeechResult } from './speech-recovery';
 
 const MAX_BYTES = 150 * 1024 * 1024;
 const MAX_DURATION = 120;
@@ -87,7 +89,7 @@ export const speechIsReady = () => speechReady;
 
 function speechTask(input: Float32Array | 'prepare', progress: (message: string) => void, signal: AbortSignal) {
   signal.throwIfAborted();
-  return new Promise<Evidence[]>((resolve, reject) => {
+  return new Promise<SpeechResult>((resolve, reject) => {
     try { speechWorker ??= new Worker(new URL('./speech.worker.ts', import.meta.url), { type: 'module' }); }
     catch (error) {
       console.debug('Không mở được bộ xử lý lời thoại:', error);
@@ -102,7 +104,7 @@ function speechTask(input: Float32Array | 'prepare', progress: (message: string)
       worker.removeEventListener('error', fail);
       signal.removeEventListener('abort', cancel);
     };
-    const message = (event: MessageEvent<{ kind: string; message?: string; evidence?: Evidence[] }>) => {
+    const message = (event: MessageEvent<Partial<SpeechResult> & { kind: string; message?: string }>) => {
       if (event.data.kind === 'progress') {
         window.clearTimeout(timer);
         timer = window.setTimeout(timeout, 180_000);
@@ -112,7 +114,8 @@ function speechTask(input: Float32Array | 'prepare', progress: (message: string)
       clean();
       if (event.data.kind === 'success') {
         speechReady = true;
-        resolve(event.data.evidence ?? []);
+        resolve({ evidence: event.data.evidence ?? [], discarded: event.data.discarded ?? 0,
+          retried: event.data.retried ?? 0, timingRejected: event.data.timingRejected ?? 0 });
       }
       else reject(Error(event.data.message || 'Lỗi nhận dạng lời thoại.'));
     };
@@ -137,7 +140,7 @@ export async function prepareSpeech(progress: (message: string) => void, signal:
 }
 
 async function audioSamples(blob: Blob) {
-  const audio = await new OfflineAudioContext(1, 1, 16_000).decodeAudioData(await blob.arrayBuffer());
+  const audio = await new OfflineAudioContext(1, 1, speechSampleRate).decodeAudioData(await blob.arrayBuffer());
   const samples = new Float32Array(audio.length);
   for (let channel = 0; channel < audio.numberOfChannels; channel++) {
     const data = audio.getChannelData(channel);
@@ -308,9 +311,16 @@ export async function analyzeVideo(blob: Blob, options: ScanOptions, progress: (
         if (!samples.some(value => Math.abs(value) > 0.005)) sources.audio = { state: 'empty', detail: 'Âm thanh quá nhỏ để nhận dạng.' };
         else {
           const speech = await speechTask(samples, progress, signal);
-          const kept = keepSpeechEvidence(speech);
+          const kept = keepSpeechEvidence(speech.evidence);
           evidence.push(...kept);
-          sources.audio = screenedSource('audio', kept.length, speech.length - kept.length);
+          const drafts = kept.filter(referenceOnly).length;
+          const outcome = screenedSource('audio', kept.length - drafts, speech.discarded + speech.evidence.length - kept.length);
+          if (speech.retried) {
+            outcome.detail += ` Đã thử đọc lại ${speech.retried} đoạn âm thanh ngắn.`;
+            if (speech.timingRejected) outcome.detail += ` Bỏ ${speech.timingRejected} đoạn có mốc thời gian bất thường.`;
+            if (drafts) outcome.detail += ` Có ${drafts} đoạn độ tin cậy thấp để nghe lại.`;
+          }
+          sources.audio = outcome;
         }
       } catch (error) {
         signal.throwIfAborted();

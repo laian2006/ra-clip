@@ -1,5 +1,6 @@
 import { env, pipeline, type AutomaticSpeechRecognitionPipeline, type AutomaticSpeechRecognitionOutput } from '@huggingface/transformers';
 import type { Evidence } from './domain';
+import { recoverLoopedSpeech, speechSampleRate } from './speech-recovery';
 
 env.allowLocalModels = false;
 if (env.backends.onnx.wasm) {
@@ -56,12 +57,13 @@ async function prepare() {
   }
 }
 
-async function recognize(samples: Float32Array) {
-  const transcriber = await prepare();
-  self.postMessage({ kind: 'progress', message: 'Đang nhận dạng lời thoại tiếng Việt…' });
+async function readSegments(transcriber: AutomaticSpeechRecognitionPipeline, samples: Float32Array, shortWindow: boolean) {
+  const limits = shortWindow
+    ? { max_new_tokens: Math.ceil(samples.length / speechSampleRate * 8) + 16 }
+    : { chunk_length_s: 25, stride_length_s: 4 };
   const output = await transcriber(samples, {
     language: 'vietnamese', task: 'transcribe', return_timestamps: true,
-    chunk_length_s: 25, stride_length_s: 4,
+    ...limits,
   }) as AutomaticSpeechRecognitionOutput;
   const evidence: Evidence[] = (output.chunks ?? []).flatMap(chunk => {
     const text = chunk.text.trim();
@@ -74,12 +76,21 @@ async function recognize(samples: Float32Array) {
   return evidence;
 }
 
+async function recognize(samples: Float32Array) {
+  const transcriber = await prepare();
+  self.postMessage({ kind: 'progress', message: 'Đang nhận dạng lời thoại tiếng Việt…' });
+  const firstPass = await readSegments(transcriber, samples, false);
+  return recoverLoopedSpeech(samples, firstPass, window => readSegments(transcriber, window, true), (current, total) => {
+    self.postMessage({ kind: 'progress', message: `Đọc lại lời thoại theo đoạn ngắn · ${current}/${total}` });
+  });
+}
+
 self.addEventListener('message', async (event: MessageEvent<Float32Array | 'prepare'>) => {
   try {
     if (event.data === 'prepare') {
       await prepare();
       self.postMessage({ kind: 'success' });
-    } else self.postMessage({ kind: 'success', evidence: await recognize(event.data) });
+    } else self.postMessage({ kind: 'success', ...await recognize(event.data) });
   } catch (error) {
     console.debug('PhoWhisper:', error);
     self.postMessage({ kind: 'error', message: model

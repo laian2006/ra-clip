@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { CircleAlert, CirclePlay, Image, Pencil, Plus, Search, Trash2 } from 'lucide-react';
-import { fold } from './claims';
+import { fold, referenceOnly } from './claims';
 import { sourceLabels, timestamp } from './domain';
 import type { Clip, Evidence } from './domain';
 import { Modal } from './ui';
@@ -67,9 +67,11 @@ export function EvidenceTimeline({ clip, playable, busy, initialSource, onJump, 
     <ul className="timeline-list">{rows.map(({ entry, index }) => <li key={index}>
       <button type="button" className="time-button" disabled={!playable} onClick={() => onJump(entry.start)}
         aria-label={`Phát từ ${timestamp(entry.start)}`}><CirclePlay size={15}/>{timestamp(entry.start)}</button>
-      <div><small>{sourceLabels[entry.source]}{entry.corrected && <span className="corrected">Đã sửa tay</span>}</small><p>{entry.text}</p></div>
-      <button type="button" className="icon-button" disabled={busy} onClick={() => onEdit(index)} title="Sửa đoạn"
-        aria-label={`Sửa đoạn ${timestamp(entry.start)} · ${sourceLabels[entry.source]}`}><Pencil size={15} /></button>
+      <div><small>{sourceLabels[entry.source]}{entry.corrected && <span className="corrected">Đã sửa tay</span>}
+        {referenceOnly(entry) && <span className="low-confidence">Độ tin cậy thấp</span>}</small><p>{entry.text}</p></div>
+      <button type="button" className="icon-button" disabled={busy} onClick={() => onEdit(index)}
+        title={referenceOnly(entry) ? 'Kiểm tra đoạn' : 'Sửa đoạn'}
+        aria-label={`${referenceOnly(entry) ? 'Kiểm tra đoạn' : 'Sửa đoạn'} ${timestamp(entry.start)} · ${sourceLabels[entry.source]}`}><Pencil size={15} /></button>
     </li>)}</ul>
     {!rows.length && <p className="empty-inline">{clip.evidence.length ? 'Không có đoạn nào khớp bộ lọc.' : 'Chưa có đoạn trích. Phân tích video hoặc thêm một đoạn thủ công.'}</p>}
   </div>;
@@ -102,7 +104,8 @@ export function EvidenceDialog({ row, onSave, onClose }: {
   }
 
   return <Modal title={row ? 'Sửa đoạn trích' : 'Thêm đoạn trích'}
-    detail="Báo cáo cập nhật ngay sau khi lưu đoạn." busy={busy} onClose={onClose}>
+    detail={row && referenceOnly(row) ? 'Kiểm tra đoạn gốc, chỉnh nội dung nếu cần rồi lưu để dùng khi đối chiếu.'
+      : 'Báo cáo cập nhật ngay sau khi lưu đoạn.'} busy={busy} onClose={onClose}>
     <form className="dialog-form" onSubmit={submit}>
       <div className="form-grid">
         <label>Bắt đầu (giây)<input type="number" min="0" max="7200" step="0.01" required

@@ -54,7 +54,8 @@ function readEvidence(value: unknown): Evidence {
   const start = numeric(row.start, 7200);
   const end = row.end === null ? null : numeric(row.end, 7200);
   if (end !== null && end < start) throw malformed();
-  return { start, end, text: string(row.text, 50_000), source: oneOf(row.source, sourceNames), corrected: row.corrected === true };
+  return { start, end, text: string(row.text, 50_000), source: oneOf(row.source, sourceNames), corrected: row.corrected === true,
+    lowConfidence: row.lowConfidence === true ? true : undefined };
 }
 function readMask(value: unknown): EvidenceMask {
   const row = object(value);

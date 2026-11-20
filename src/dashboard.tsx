@@ -3,7 +3,7 @@ import {
   ArrowDownToLine, ArrowLeft, ArrowUpRight, CalendarClock, ChevronRight, CirclePlay, FileVideo,
   Captions, Film, Link2, ListChecks, Pencil, ScanLine, Search, Trash2,
 } from 'lucide-react';
-import { fold } from './claims';
+import { fold, referenceOnly } from './claims';
 import { clipFormats, kindLabels, reviewLabels, sourceLabels, timestamp, verdictLabels } from './domain';
 import type { Clip, ClipFormat, ClipResult, Evidence, Finding, Review, Verdict } from './domain';
 import { loadMedia } from './storage';
@@ -210,6 +210,7 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
   const activeReview = active ? reviews[active.id] : undefined;
   const playable = clip.localMedia || Boolean(clip.demoMedia);
   const speechGap = filteredSpeech(clip);
+  const hasSpeechDraft = clip.evidence.some(row => row.source === 'audio' && referenceOnly(row));
   const coverage = active && ((!hasSku && active.verdict === 'review') || (active.kind === 'coverage' && !active.evidence))
     ? coverageHelp(clip, hasSku) : undefined;
   const unclearEvidence = active?.kind === 'coverage' ? active.evidence : undefined;
@@ -230,6 +231,7 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
     audio: { label: playable ? clip.lastScan?.audio || clip.lastScan?.sources?.audio ? 'Thử lại lời thoại' : 'Quét lời thoại' : 'Bổ sung phụ đề',
       run: () => playable ? onScan(clip, { audio: true, frame: false }) : onEdit(clip) },
     subtitles: { label: 'Thêm phụ đề hoặc lời thoại', run: () => onEdit(clip, true) },
+    'audio-draft': { label: 'Xem lời thoại đọc lại', run: () => openSegments('audio') },
     segments: { label: 'Xem các đoạn đã đọc', run: () => openSegments() },
     scan: { label: 'Quét video này', run: () => onScan(clip) },
     correct: { label: 'Sửa đoạn lời thoại', run: () => onEvidence(clip, unclearIndex) },
@@ -266,8 +268,9 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
         <FileVideo size={15} aria-hidden="true" /> Gắn file video hoặc phụ đề
       </button>}
       {playable && <button className="text-button scan-video" type="button" onClick={() => onScan(clip)} disabled={busy}><ScanLine size={15} /> Phân tích video bằng AI</button>}
-      {speechGap && (tab === 'segments' || coverage?.action !== 'subtitles') && <div className="scan-guidance">
+      {speechGap && (tab === 'segments' || coverage?.action !== 'subtitles' && coverage?.action !== 'audio-draft') && <div className="scan-guidance">
         <p>{speechGap}</p>
+        {hasSpeechDraft && tab !== 'segments' && <button type="button" className="text-button" onClick={() => openSegments('audio')}>Xem lời thoại đọc lại</button>}
         <button type="button" className="text-button" onClick={() => onEdit(clip, true)} disabled={busy}>Thêm phụ đề hoặc lời thoại</button>
       </div>}
       <div className="segmented evidence-tabs" role="group" aria-label="Xem bằng chứng">
@@ -290,6 +293,8 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
             clip={clip} seconds={active.evidence.start} onJump={() => select(active)} />}
           {active.verdict === 'review' && <button className="button secondary evidence-next" type="button" onClick={nextAction.run} disabled={busy}>
             {nextAction.label}</button>}
+          {coverage?.action === 'audio-draft' && <button className="text-button evidence-next" type="button"
+            onClick={() => onEdit(clip, true)} disabled={busy}>Thêm phụ đề hoặc lời thoại</button>}
         </div>
         <label className="review-field"><span><ListChecks size={16} /> Phản hồi của shop</span>
           <select value={activeReview ?? ''} aria-label="Phản hồi của shop" disabled={busy}
@@ -311,12 +316,15 @@ export function ClipDetail({ clip, result, focusedFinding, reviews, notes, onRev
       {(playable || clip.lastScan || clip.evidence.length > 0) && <div className="clip-scan-summary">
         <strong>Nguồn bằng chứng</strong>
         <ul className="evidence-sources">{sourceKeys.map(source => {
-          const count = clip.evidence.filter(entry => entry.source === source).length;
+          const entries = clip.evidence.filter(entry => entry.source === source);
+          const count = entries.length;
+          const drafts = entries.filter(referenceOnly).length;
           const outcome = source === 'audio' || source === 'frame' ? clip.lastScan?.sources?.[source] : undefined;
           if (!count && !outcome && source !== 'audio' && source !== 'frame') return null;
           return <li key={source}>
             {count ? <button type="button" className="text-button" onClick={() => openSegments(source)}>{sourceLabels[source]} · {count} đoạn</button>
               : <span>{sourceLabels[source]} · {outcome ? '0 đoạn giữ lại' : 'Chưa quét'}</span>}
+            {drafts > 0 && <small>{drafts}/{count} đoạn độ tin cậy thấp</small>}
             {outcome && <small>{outcome.detail}</small>}
           </li>;
         })}</ul>

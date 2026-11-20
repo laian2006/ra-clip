@@ -3,9 +3,10 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { auditDraft, validateOffers } from './audit';
 import { completeScan, failScan } from './batch';
 import { ClipPlayer } from './dashboard';
-import { displayDateTime, localTime } from './domain';
+import { displayDateTime, localTime, sourceLabels, timestamp } from './domain';
 import type { Audit, Clip, Evidence, Offer } from './domain';
 import { filteredSpeech } from './evidence-quality';
+import { referenceOnly } from './claims';
 import { auditCsv, download, readPrice, readSubtitles } from './files';
 import { analyzeVideo, validateVideo, videoMetadata, type ScanOptions } from './media';
 import { readOfferBrief } from './offer-brief';
@@ -257,6 +258,14 @@ export function QuickCheck() {
             <p>{filteredSpeech(result.clip)}</p>
             <button type="button" className="text-button" onClick={() => subtitleInput.current?.focus()}>Thêm phụ đề hoặc lời thoại</button>
           </div>}
+          {result.clip.evidence.some(referenceOnly) && <details className="scan-guidance">
+            <summary>Đoạn đọc được có độ tin cậy thấp</summary>
+            <ul>{result.clip.evidence.filter(referenceOnly).map((entry, index) => <li key={index}>
+              {result.playable && <button type="button" className="text-button" onClick={() =>
+                setJump(current => ({ time: entry.start, tick: (current?.tick ?? 0) + 1 }))}>Đến {timestamp(entry.start)}</button>}
+              <p>{sourceLabels[entry.source]} · {entry.text}</p>
+            </li>)}</ul>
+          </details>}
           <ToolFindings findings={findings} onEvidence={result.playable ? row => {
             if (row.evidence) setJump(current => ({ time: row.evidence!.start, tick: (current?.tick ?? 0) + 1 }));
           } : undefined} />

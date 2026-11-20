@@ -4,6 +4,21 @@ import { normalizeCode } from './domain';
 export const fold = (value: string) =>
   value.toLocaleLowerCase('vi').normalize('NFD').replace(/\p{M}/gu, '').replace(/đ/g, 'd');
 
+export function hasOfferCue(text: string) {
+  const value = fold(text);
+  const price = /(?:^|[^a-z0-9])(?:\d{1,3}(?:[.,]\d{3})+|\d{2,})\s*(?:k\b|d\b|dong\b|vnd\b|nghin\b|ngan\b|trieu\b|₫)/.test(value) ||
+    /\b(?:gia|chi con|giam con)\s*[:=]?\s*\d{2,}\b/.test(value);
+  const labeled = /\b(?:ma|voucher|code)\s*[:=]?\s*[a-z0-9][a-z0-9_-]{1,39}\b/.test(value);
+  const gift = /\btang\s+(?:[0-9]+|[a-z]{2,})\b/.test(value);
+  const code = text.split('\n').some(line => /^[A-Z]{3,}[0-9][A-Z0-9_-]*$/.test(line.trim()));
+  const date = /\b(?:chi\s+(?:co\s+)?hom\s+nay|(?:chi|ngay|het|den)\s+(?:ngay\s+)?\d{1,2}[/-]\d{1,2})\b/.test(value);
+  return price || labeled || gift || code || date;
+}
+
+export function referenceOnly(row: Evidence) {
+  return !row.corrected && (row.lowConfidence || (row.source === 'frame' && !hasOfferCue(row.text)));
+}
+
 const disclosurePattern = /\b(?:chi(?:\s+(?:ap\s+dung|co|trong|den))?\s+(?:ngay\s+)?|(?:ap\s+dung\s+)?(?:tu|den|het)\s+(?:ngay\s+)?|ngay\s+)(\d{1,2})[/-](\d{1,2})(?:[/-](\d{4}))?\b/g;
 const conditionPattern = /\b(?:khi\s+(?:ap|dung|nhap|co|mua|dat)|voi\s+(?:ma|voucher)|don\s+tu|mua\s+(?:combo|[2-9]|hai|ba|bon|nam)|tu\s+\d+\s+(?:mon|san\s+pham)|khach\s+moi|cho\s+(?:don|khach|lan)|(?:ma|voucher)\s+[a-z0-9])\b/;
 const pricePattern = /(?<![\p{L}\d])(?:(\d{1,3}(?:[., ]\d{3})+|\d+(?:[.,]\d+)?)\s*(trieu|tr|nghin|ngan|k|dong|vnd|d)(?![\p{L}\d])|(\d{1,3}(?:[., ]\d{3})+|\d+)(?![\p{L}\d]))/gu;
@@ -166,18 +181,19 @@ function readCodes(text: string, offers: Offer[]) {
 export function unclearSpokenVoucher(clip: Clip, offers: Offer[]) {
   const mentioned = /\b(?:(?:ap|nhap|dung)\s+ma|ma\s+(?:giam gia|uu dai)|voucher)\b/;
   const negated = /\b(?:khong|chang)\s+(?:can\s+)?(?:ap|nhap|dung)\s+ma\b/;
-  return clip.evidence.find(segment => {
+  const evidence = clip.evidence.filter(row => !referenceOnly(row));
+  return evidence.find(segment => {
     if (segment.source !== 'audio') return false;
     const text = fold(segment.text);
     if (!mentioned.test(text) || negated.test(text)) return false;
-    return !clip.evidence.some(row => !row.untimed && Math.abs(row.start - segment.start) <= 4 && readCodes(row.text, offers).length > 0);
+    return !evidence.some(row => !row.untimed && Math.abs(row.start - segment.start) <= 4 && readCodes(row.text, offers).length > 0);
   });
 }
 
 export function extractClaims(clip: Clip, offers: Offer[]) {
   const claims: Claim[] = [];
   const seen = new Set<string>();
-  const evidence = [...clip.evidence].sort((a, b) => a.start - b.start);
+  const evidence = clip.evidence.filter(row => !referenceOnly(row)).sort((a, b) => a.start - b.start);
   const lastBySource = new Map<Evidence['source'], Evidence>();
   for (const segment of evidence) {
     const prior = lastBySource.get(segment.source);

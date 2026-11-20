@@ -82,6 +82,36 @@ test('a filtered empty transcript leads to adding subtitles and recovers a worki
   await expect(detail.getByRole('button', { name: 'Thêm phụ đề hoặc lời thoại' })).toHaveCount(0);
 });
 
+test('reviewing recovered speech on a narrow screen enables it for the audit', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await seedShop(page, [{
+    id: 'retry', sku: 'SON-MERZY', title: 'Lời thoại đọc lại', link: '', published: '', localMedia: false, demoMedia: true,
+    evidence: [
+      { start: 5, end: 9, source: 'audio', text: 'Giá 150k.', lowConfidence: true },
+      { start: 6, end: null, source: 'frame', text: 'First Care Activating Serum' },
+    ],
+    lastScan: {
+      at, audio: true, frame: true, state: 'partial', detail: 'Đã đọc lại lời thoại theo đoạn ngắn.',
+      sources: { audio: { state: 'empty', discarded: 1, detail: 'Có đoạn độ tin cậy thấp để nghe lại.' } },
+    },
+  }]);
+  await page.getByRole('button', { name: 'Xem bằng chứng', exact: true }).click();
+  const detail = page.locator('#clip-evidence');
+  await expect(detail.locator('.evidence-card .tag')).toHaveText('Cần xác nhận');
+  await detail.getByRole('button', { name: 'Xem lời thoại đọc lại', exact: true }).click();
+  await expect(detail.getByLabel('Nguồn đoạn trích')).toHaveValue('audio');
+  await expect(detail.getByText('Độ tin cậy thấp', { exact: true })).toBeVisible();
+  await detail.getByRole('button', { name: 'Kiểm tra đoạn 00:05 · Lời thoại' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByLabel('Nội dung đoạn trích')).toHaveValue('Giá 150k.');
+  await dialog.getByRole('button', { name: 'Lưu đoạn trích' }).click();
+  await expect(detail.getByText('Đã sửa tay', { exact: true })).toBeVisible();
+  await detail.getByRole('button', { name: 'Phát hiện', exact: true }).click();
+  await expect(detail.locator('.evidence-card .tag')).toHaveText('Cần xử lý');
+  await detail.getByRole('button', { name: /Chữ trên video · 1 đoạn/ }).click();
+  await expect(detail.getByText('Độ tin cậy thấp', { exact: true })).toBeVisible();
+});
+
 test('three distinct review reasons lead to the right actions on a phone', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const common = { sku: 'SON-MERZY', link: '', published: '', localMedia: false, demoMedia: true };

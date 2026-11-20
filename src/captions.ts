@@ -1,4 +1,5 @@
 import type { Evidence } from './domain';
+import { referenceOnly } from './claims';
 
 function cueTime(seconds: number) {
   const milliseconds = Math.max(0, Math.round(seconds * 1000));
@@ -9,7 +10,7 @@ function cueTime(seconds: number) {
 }
 
 export function captionsFor(evidence: Evidence[]) {
-  const timed = evidence.filter(row => !row.untimed && row.text.trim());
+  const timed = evidence.filter(row => !row.untimed && row.text.trim() && !referenceOnly(row));
   const source = ['subtitle', 'audio', 'manual'].find(source => timed.some(row => row.source === source));
   if (!source) return '';
   const rows = timed.filter(row => row.source === source).sort((a, b) => a.start - b.start);

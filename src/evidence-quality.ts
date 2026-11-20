@@ -1,5 +1,5 @@
 import type { Clip, Evidence, MediaSource, ScanReceipt, ScanSource } from './domain';
-import { fold } from './claims';
+import { hasOfferCue, referenceOnly } from './claims';
 
 export function hasSpeechLoop(text: string) {
   const words = text.normalize('NFC').toLocaleLowerCase('vi').match(/[\p{L}\p{N}]+/gu) ?? [];
@@ -17,15 +17,6 @@ export function hasSpeechLoop(text: string) {
     }
   }
   return false;
-}
-
-function hasOfferCue(text: string) {
-  const value = fold(text);
-  const price = /(?:^|[^a-z0-9])(?:\d{1,3}(?:[.,]\d{3})+|\d{2,})\s*(?:k\b|d\b|dong\b|vnd\b|nghin\b|ngan\b|trieu\b|₫)/.test(value);
-  const labeled = /\b(?:ma|voucher|code)\s*[:=]?\s*[a-z0-9][a-z0-9_-]{1,39}\b/.test(value);
-  const gift = /\btang\s+(?:[0-9]+|[a-z]{2,})\b/.test(value);
-  const code = /^[A-Z]{3,}[0-9][A-Z0-9_-]*$/.test(text);
-  return price || labeled || gift || code;
 }
 
 function readableText(text: string, confidence: number) {
@@ -64,7 +55,12 @@ export function keepSpeechEvidence(rows: Evidence[]) {
 
 export function filteredSpeech(clip: Clip) {
   const source = clip.lastScan?.sources?.audio;
-  if (source?.state !== 'empty' || !source.discarded || clip.evidence.some(row => row.source !== 'frame')) return '';
+  if (source?.state !== 'empty' || !source.discarded ||
+    clip.evidence.some(row => row.source !== 'frame' && !referenceOnly(row))) return '';
+  const drafts = clip.evidence.filter(row => row.source === 'audio' && referenceOnly(row)).length;
+  if (drafts) {
+    return `Đã loại lời thoại lặp bất thường. Lượt đọc lại có ${drafts} đoạn độ tin cậy thấp. Nghe lại đoạn gốc và lưu lời thoại đúng, hoặc thêm phụ đề SRT/VTT.`;
+  }
   return `Đã loại ${source.discarded} đoạn lời thoại lặp bất thường. Lời thoại còn 0 đoạn để đối chiếu. Bạn có thể thêm phụ đề SRT/VTT hoặc nhập câu quảng cáo có mốc thời gian.`;
 }
 
@@ -86,10 +82,10 @@ export function screenSavedEvidence(clip: Clip): Clip {
     const sources = { ...lastScan.sources };
     for (const source of ['audio', 'frame'] as const) {
       if (!removed[source]) continue;
-      sources[source] = screenedSource(source, evidence.filter(row => row.source === source).length,
+      sources[source] = screenedSource(source, evidence.filter(row => row.source === source && !referenceOnly(row)).length,
         removed[source] + (sources[source]?.discarded ?? 0));
     }
-    const hasMachineEvidence = evidence.some(row => row.source === 'audio' || row.source === 'frame');
+    const hasMachineEvidence = evidence.some(row => (row.source === 'audio' || row.source === 'frame') && !referenceOnly(row));
     lastScan = {
       ...lastScan, sources, state: hasMachineEvidence ? 'partial' : 'empty',
       detail: Object.values(sources).map(outcome => outcome.detail).join(' ').slice(0, 1600),
