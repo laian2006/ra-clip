@@ -1,7 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
-import { version as releaseVersion } from '../package.json';
+import { readFileSync } from 'node:fs';
 import type { Clip, OfferVersion } from '../src/domain';
 
+const releaseVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const at = '2026-11-20T09:00';
 const version: OfferVersion = {
   id: 'v1', at, offers: [{ sku: 'SON-MERZY', name: 'Son', code: '', price: 140000, gift: 'Mua 1 tặng 1', start: '', end: '', condition: '' }],
